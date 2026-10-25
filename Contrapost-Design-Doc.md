@@ -1,6 +1,6 @@
 # Contrapost — Double-Entry Payments Ledger
 
-> **Status:** Design draft, revision 2 · Oct 2026 · Personal project
+> **Status:** Design draft, revision 3 · Oct 2026 · Personal project
 > **Author:** Pratik Kumbhar
 > **Name:** *Contrapost* — from "contra entry" (an entry that offsets another) + "posting"
 
@@ -21,6 +21,10 @@ Revision 1 had gaps that would have surfaced as schema rewrites during M3–M5. 
 | R7 | Reversals could overdraw an account | Reversals obey overdraft rules. Only `transfer` and `capture` transactions can be reversed |
 | R8 | Currency, tenant and overdraft rules enforced only in code | Composite foreign keys enforce currency and tenant; overdraft flags are copied to `account_balances` and enforced by `CHECK` |
 | R9 | I6 broke once outbox cleanup deleted old rows; idempotency retention allowed double-apply after 24 h | The event invariant (now I7) is checked inside the outbox retention window; transfer `reference` is unique per client |
+
+### Revision 3 changes
+
+- A read-only **admin dashboard** (Next.js) moves from stretch goal into v1 as milestone M7 (§5.2, §7.1, §16). The write-up becomes M8.
 
 ---
 
@@ -76,12 +80,13 @@ My existing work already covers APIs, integrations, Hangfire jobs (Tudip), DAG o
 - **G6 — Reliable events.** Every committed transaction produces exactly one event in the outbox. Delivery to consumers is at-least-once, and consumers deduplicate.
 - **G7 — Self-verification.** A reconciliation job recomputes balances from postings and reports any drift.
 - **G8 — Measured.** Published throughput and latency numbers, plus a documented chaos-test run.
+- **G9 — Inspectable.** A read-only admin dashboard shows accounts, balances, history, holds, reconciliation results and outbox health, so the system can be demoed without reading API docs.
 
 ### Non-goals (v1)
 
 - Currency conversion. Each transaction uses a single currency.
 - Real payment rails (card networks, UPI, bank transfers). Money moves only between ledger accounts.
-- User-facing wallet UI. A small admin dashboard is optional (see milestones).
+- User-facing wallet UI. The admin dashboard (G9) is an operator tool and is read-only.
 - Multi-region replication.
 - Regulatory compliance (KYC, PCI). This is a portfolio system, not a licensed one.
 
@@ -231,6 +236,9 @@ flowchart LR
 
     API -. OTel .-> O[Grafana / Prometheus / Tempo / Loki]
     Workers -. OTel .-> O
+
+    AD[Admin dashboard<br/>Next.js, server-side] -->|admin:read API key| API
+    AD -. links to .-> O
 ```
 
 **Key decision:** everything that must be atomic (postings, balance updates, the idempotency record and the outbox row) is written in **one PostgreSQL transaction**. Nothing on the write path talks to the broker directly, so there is no dual-write problem.
@@ -269,6 +277,31 @@ sequenceDiagram
 The idempotency row is never visible to other sessions before it is complete, because it commits with everything else. A concurrent duplicate's `INSERT` waits on the uncommitted key in the unique index. If the first request commits, the `INSERT` returns no row and the stored response is replayed. If the first request rolls back, the `INSERT` succeeds and the duplicate does the work. `lock_timeout` stops a duplicate from holding a connection while a slow request finishes.
 
 A business rejection, such as insufficient funds, is also a completed outcome. The checks run before anything else is written, so the transaction commits with only the idempotency row, which stores the 422 response. A retry then returns the same answer. Validation errors (400) are returned before `BEGIN` and are not stored.
+
+---
+
+### 5.2 Admin dashboard
+
+A small operator console that makes the ledger's state visible. It is a separate Next.js (App Router, TypeScript) app in `web/admin/` and talks to the ledger **only through the API's admin endpoints**, never to the database directly. That keeps tenant rules, paging and auditing in one place.
+
+**Read-only in v1.** The dashboard can't move money. Write actions would need idempotency keys, an audit trail and stronger operator authentication, which is out of scope. Corrections are still made through the API.
+
+| Page | Shows |
+|---|---|
+| Overview | Totals per currency (I2 zero-sum shown as a check), transfer counts by result over the last hour, outbox lag and unpublished count, latest reconciliation status |
+| Accounts | Search by code, filter by client, currency, status |
+| Account detail | Posted, pending and available balances; entry history paged by `account_seq`; open holds |
+| Transaction detail | Legs, kind, linked hold or reversal, and the outbox event with its publish status |
+| Holds | Filter by status; expiring in the next 10 minutes |
+| Reconciliation | Runs with status and duration; findings with expected and actual values |
+| Outbox | Unpublished and failing messages with `attempts`, `next_attempt_at` and `last_error` |
+
+**How it works:**
+- **Server-side data fetching only.** Pages are React Server Components that call `/v1/admin/*` with an API key holding the `admin:read` scope. The key lives in the dashboard's server environment and is never sent to the browser.
+- **Operator login.** One operator account configured through environment variables (username plus a password hash), with an HTTP-only signed session cookie. The public demo deployment points at a sandbox database and can turn on a read-only guest mode.
+- **Freshness.** The overview polls every 5 s; other pages load on navigation. Nothing is cached in Redis, which matches the rule that balances are always read from Postgres (§18).
+- **Metrics stay in Grafana.** The dashboard links to the Grafana panels for throughput and latency rather than re-implementing charts.
+- **Tests.** Playwright smoke tests run against the Compose stack in CI: log in, open an account, page its history, open a reconciliation run.
 
 ---
 
@@ -345,8 +378,17 @@ Base path `/v1`. JSON throughout. Errors use RFC 9457 Problem Details. Every `PO
 | `GET` | `/holds/{id}` | Hold details and status |
 | `POST` | `/holds/{id}/capture` | Capture full or partial amount |
 | `POST` | `/holds/{id}/void` | Release the remaining amount |
+| `GET` | `/admin/overview` | Totals per currency, recent transfer counts, outbox lag, latest reconciliation run |
+| `GET` | `/admin/accounts?q=&client_id=&currency=&status=&after=` | Search accounts across clients (keyset paging) |
+| `GET` | `/admin/accounts/{id}` | Account with balances, open holds and recent entries |
+| `GET` | `/admin/transactions/{id}` | Transaction with legs, linked hold or reversal, and its outbox message |
+| `GET` | `/admin/holds?status=&expiring_within=&after=` | Holds by status or upcoming expiry |
 | `GET` | `/admin/reconciliation/runs` | Latest reconciliation results |
+| `GET` | `/admin/reconciliation/runs/{id}/findings` | Findings for one run |
+| `GET` | `/admin/outbox?state=unpublished\|failing&after=` | Outbox messages waiting or failing |
 | `GET` | `/health/live`, `/health/ready` | Liveness and readiness probes |
+
+All `/admin/*` endpoints require the `admin:read` scope, are read-only, and are the only endpoints that read across clients. They are served by EF Core read queries with `AsNoTracking`, take no locks, and could later point at a read replica.
 
 ### 7.2 Examples
 
@@ -570,7 +612,7 @@ Reconciliation never takes locks (`REPEATABLE READ, READ ONLY`). The per-account
 ## 11. Security
 
 - **API keys:** the format is `cp_<env>_<prefix>.<secret>`. Only the SHA-256 hash of the secret is stored; lookup uses the prefix and comparison uses constant time.
-- **Scopes** per client (`accounts:read`, `accounts:write`, `transfers:write`, `holds:write`, `admin:read`).
+- **Scopes** per client (`accounts:read`, `accounts:write`, `transfers:write`, `holds:write`, `admin:read`). `admin:read` is the only scope that crosses tenants; it is granted only to the admin dashboard's key, and every admin request is logged with the operator's session id passed in `X-Operator-Session`.
 - **Tenant isolation:** every query is filtered by `client_id`. Integration tests check that client A can't read or move client B's accounts.
 - **Rate limiting:** a Redis sliding window per client returns `429` with `Retry-After`. If Redis is unavailable, the limiter **fails open**, logs a warning and records a metric. This choice is documented in the case study.
 - **Request limits:** maximum body size, maximum legs per transfer, input validation with FluentValidation.
@@ -694,6 +736,8 @@ contrapost/
 │   └── tests/guards.sql             # one test per DB guard
 ├── scripts/
 │   └── db-test.sh                   # runs the guard tests in a throwaway Postgres container
+├── web/
+│   └── admin/                       # admin dashboard (Next.js, §5.2)
 ├── deploy/
 │   ├── docker-compose.yml
 │   ├── grafana/                     # dashboards as code
@@ -715,12 +759,14 @@ contrapost/
 6. ADR-006 Rate limiter fails open when Redis is unavailable
 7. ADR-007 Holds are the record of pending money; postings record only posted money
 8. ADR-008 Database guards as a second line of defence (composite FKs, overdraft `CHECK`s, deferred balance triggers)
+9. ADR-009 Minimal APIs instead of controllers *(written)*
+10. ADR-010 Admin dashboard is read-only and reads only through the API
 
 ---
 
 ## 16. Milestones
 
-Roughly 6–7 weeks of evenings and weekends.
+Roughly 7–8 weeks of evenings and weekends.
 
 | # | Milestone | Deliverables | Done when |
 |---|---|---|---|
@@ -731,9 +777,10 @@ Roughly 6–7 weeks of evenings and weekends.
 | M4 | Outbox and events (1 week) | Outbox, relay with confirms, two consumers with inbox dedupe, DLQ | Chaos runs C2 and C3 pass |
 | M5 | Verification (1 week) | Reconciliation job, concurrency harness, FsCheck suite, Redis rate limiter | 5-minute concurrency run shows 0 findings |
 | M6 | Measure and ship (1 week) | OTel + Grafana, k6 scenarios, strategy A/B/C benchmark, chaos C1–C5, cloud deploy | Results published in `docs/results/` |
-| M7 | Write-up (3 days) | README, ADRs, portfolio case study | Case study live on the portfolio |
+| M7 | Admin dashboard (1 week) | `/v1/admin/*` endpoints, Next.js dashboard (§5.2), operator login, Compose service, Playwright smoke tests | Every page in §5.2 works against the Compose stack; smoke tests pass in CI |
+| M8 | Write-up (3 days) | README, ADRs, portfolio case study with dashboard screenshots | Case study live on the portfolio |
 
-**Stretch goals (after v1):** hot-account sharding, a minimal admin UI (Next.js) showing accounts, transfers and reconciliation runs, multi-currency with explicit FX transactions, and a Kafka variant of the relay for comparison.
+**Stretch goals (after v1):** hot-account sharding, write actions in the admin dashboard (reversals, freezing accounts) with an audit trail, multi-currency with explicit FX transactions, and a Kafka variant of the relay for comparison.
 
 ---
 
@@ -758,7 +805,7 @@ Fill these in from real runs. Leave out any number you didn't measure.
 
 | Risk / question | Mitigation or decision needed |
 |---|---|
-| Scope creep (FX, UI, rails) | Non-goals are fixed for v1; stretch goals only after M7 |
+| Scope creep (FX, UI, rails) | Non-goals are fixed for v1; the admin dashboard stays read-only; stretch goals only after M8 |
 | Hot-account contention limits throughput | Measure and document it; sharding is a stretch goal |
 | `postings` table growth slows reconciliation | Chunked scans; consider monthly partitioning if it gets large |
 | Free-tier hosting distorts benchmarks | Benchmark locally on stated hardware; the cloud deploy is for the demo only |
