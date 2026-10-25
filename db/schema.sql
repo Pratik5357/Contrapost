@@ -1,6 +1,7 @@
--- Contrapost schema (design doc §6, revision 2).
--- Source of truth for the database. EF Core migrations embed this file
--- rather than generating DDL, so the guards below stay exactly as written.
+-- Contrapost schema (design doc §6, revision 2). This is migration 001, the baseline.
+-- Do not edit it: later changes go in db/migrations/NNN_name.sql and are applied in order.
+-- EF Core migrations embed these files rather than generating DDL, so the guards below
+-- stay exactly as written.
 --
 -- Custom SQLSTATEs raised by the guards (the API maps these to Problem Details):
 --   CP001  unbalanced transaction (Σ debits ≠ Σ credits, or fewer than 2 postings)
