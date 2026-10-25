@@ -6,9 +6,12 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Milestone M1: accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
+Milestone M2:
+- Accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
+- API-key authentication with per-endpoint scopes.
+- Idempotency keys on transfers. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
 
-Not yet: API keys and idempotency (M2), holds and reversals (M3), event publishing (M4). Until M2, clients are identified by a temporary `X-Client-Id` header that is enabled only in Development, tests and the local Compose stack.
+Not yet: holds and reversals (M3), event publishing (M4), reconciliation and rate limiting (M5).
 
 ## Getting started
 
@@ -22,18 +25,19 @@ curl -i localhost:8080/health/live    # 200 once the process is up
 curl -i localhost:8080/health/ready   # 200 once the database is reachable and migrated
 ```
 
-Try the API (the seed creates a demo client):
+Try the API. `scripts/seed.sh` creates a client and prints its API key once:
 
 ```bash
-scripts/seed.sh
-H='X-Client-Id: 11111111-1111-1111-1111-111111111111'
+scripts/seed.sh                     # prints api_key: cp_dev_xxxxxxxx.<secret>
+H='Authorization: Bearer <api_key>'
 
 curl -s -H "$H" -H 'Content-Type: application/json' localhost:8080/v1/accounts \
   -d '{"code":"funding:INR","currency":"INR","normal_side":"debit","prevent_overdraft":false}'
 curl -s -H "$H" -H 'Content-Type: application/json' localhost:8080/v1/accounts \
   -d '{"code":"wallet:alice","currency":"INR","normal_side":"credit"}'
 
-curl -s -H "$H" -H 'Content-Type: application/json' localhost:8080/v1/transfers \
+# Money-moving POSTs need an Idempotency-Key; repeating the request replays the first response.
+curl -s -H "$H" -H 'Content-Type: application/json' -H 'Idempotency-Key: top-up-1' localhost:8080/v1/transfers \
   -d '{"currency":"INR","reference":"top-up-1","legs":[
         {"account_id":"<funding id>","direction":"debit","amount":100000},
         {"account_id":"<alice id>","direction":"credit","amount":100000}]}'
@@ -43,6 +47,8 @@ curl -s -H "$H" "localhost:8080/v1/accounts/<alice id>/entries?limit=20"
 ```
 
 Amounts are integers in minor units (paise), so `100000` is ₹1,000.
+
+Create clients with other scopes directly: `docker compose -f deploy/docker-compose.yml run --rm migrate create-client <name> [scope ...]`, where the scopes are `accounts:read accounts:write transfers:write holds:write admin:read`.
 
 Develop against the containerised infrastructure:
 
