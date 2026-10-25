@@ -307,7 +307,7 @@ A small operator console that makes the ledger's state visible. It is a separate
 
 ## 6. Data model
 
-The full DDL, including the guard triggers, lives in [`db/schema.sql`](db/schema.sql) and is the source of truth. EF Core migrations embed that file instead of generating DDL, so the guards stay exactly as written. This section summarises it.
+The full DDL, including the guard triggers, lives in [`db/schema.sql`](db/schema.sql), the baseline (migration 001). Later changes are numbered files in [`db/migrations/`](db/migrations/), such as `002_read_models.sql`, applied in order. The baseline is never edited after release. Each file is embedded in its own EF Core migration rather than generated, so the guards stay exactly as written and a fresh database and an upgraded one end up identical. This section summarises the schema.
 
 | Table | Purpose | Notable constraints |
 |---|---|---|
@@ -321,6 +321,8 @@ The full DDL, including the guard triggers, lives in [`db/schema.sql`](db/schema
 | `outbox_messages` | Events waiting to be published | `next_attempt_at` for backoff; partial index on unpublished rows |
 | `inbox_messages` | Consumer-side dedupe | `PRIMARY KEY (consumer, message_id)` |
 | `reconciliation_runs`, `reconciliation_findings` | Results of the reconciliation job | |
+| `account_statements`, `account_statement_heads` *(002)* | Statement projector's read model | Keyed `(account_id, account_seq)`, so a redelivered event is a no-op; the head records how far each statement is complete |
+| `low_balance_alerts` *(002)* | Notifier's side effect | Written once per event, deduplicated by the inbox |
 
 The key shape decisions:
 
@@ -557,14 +559,15 @@ The envelope uses CloudEvents-style fields:
     "transaction_id": "7d3e…",
     "currency": "INR",
     "legs": [
-      { "account_id": "a1…", "direction": "debit", "amount": 50000, "account_seq": 42 },
+      { "account_id": "a1…", "direction": "debit", "amount": 50000, "account_seq": 42,
+        "normal_side": "credit", "balance_after": 12500 },
       …
     ]
   }
 }
 ```
 
-Each leg carries the posting's `account_seq`. Per-account sequences are gapless, so a consumer such as the statement projector applies entries in `account_seq` order and knows when one is missing. It parks a message that arrives early until the gap is filled.
+Each leg carries the posting's `account_seq`, the account's normal side, and its posted balance after the leg (`balance_after`), so consumers never query the ledger. Per-account sequences are gapless. The statement projector stores entries as they arrive, in any order, and advances each account's `complete_through_seq` only over a gapless run, so a missing entry is visible rather than silently skipped.
 
 ### 9.2 Outbox relay
 
@@ -579,8 +582,10 @@ FOR UPDATE SKIP LOCKED;
 
 1. Publish the batch to the `ledger.events` topic exchange with **publisher confirms** enabled.
 2. Set `published_at = now()` only for the confirmed messages.
-3. On failure, increment `attempts`, record `last_error` and set `next_attempt_at = now() + backoff(attempts)` (exponential with jitter, capped at 5 min). A failing row is skipped until it is due, so it can't block newer messages. Rows past a maximum attempt count raise an alert.
-4. Optional: the API sends `NOTIFY outbox` on commit so the relay wakes up immediately instead of waiting for the next poll.
+3. If the broker **rejects** a message (a nack), increment `attempts`, record `last_error` and set `next_attempt_at = now() + backoff(attempts)` (exponential with jitter, capped at 5 min). A failing row is skipped until it is due, so it can't block newer messages. Rows past a maximum attempt count raise an alert.
+4. If the broker is **unreachable**, or the channel closes mid-batch, the relay rolls back without touching any row and retries the connection (1 s, doubling to 10 s). An outage is not the messages' fault, so it must not push them into backoff; once the broker returns, the backlog drains immediately. Publishes that did get through before the failure are sent again, and consumers deduplicate them.
+5. Messages are published with `mandatory: false`. The topology (§9.3) is declared before the first publish, so every subscribed event type has a queue. Event types nobody subscribes to yet (`account.created`, `hold.voided`, …) are dropped by the broker, which is normal pub/sub; the outbox row stays as the record.
+6. Not implemented yet: the API sending `NOTIFY outbox` on commit so the relay wakes immediately instead of polling every 200 ms.
 
 Arrival order is not guaranteed: `created_at` is the transaction's start time, not its commit time, and two relays publish concurrently. Consumers that care about order use each leg's `account_seq`, not arrival order.
 
@@ -589,7 +594,7 @@ Arrival order is not guaranteed: `created_at` is the transaction's start time, n
 - **Statement projector:** builds a denormalized `account_statements` read model (running balance per entry), which shows a CQRS-style projection.
 - **Notifier:** logs or sends a low-balance alert, to show a side-effecting consumer with dedupe.
 
-Both consumers use `inbox_messages` for idempotency, quorum queues, and a dead-letter queue for poison messages.
+Both consumers use `inbox_messages` for idempotency: the inbox row and the consumer's effect commit in one transaction, and the message is acked only after that commit. They consume from quorum queues (`statements`, `notifier`) bound to `transfer.posted`, `transfer.reversed` and `hold.captured` on the `ledger.events` topic exchange. A malformed message is dead-lettered immediately. A message whose handling keeps failing is requeued until the queue's delivery limit (5), then dead-lettered to `<queue>.dlq`.
 
 ---
 
@@ -732,7 +737,8 @@ contrapost/
 │   ├── load/                        # k6 scripts
 │   └── chaos/                       # scripts for C1–C5
 ├── db/
-│   ├── schema.sql                   # source of truth for DDL and guards (§6)
+│   ├── schema.sql                   # baseline DDL and guards, migration 001 (§6)
+│   ├── migrations/                  # 002_read_models.sql, ... applied in order
 │   └── tests/guards.sql             # one test per DB guard
 ├── scripts/
 │   └── db-test.sh                   # runs the guard tests in a throwaway Postgres container
@@ -795,8 +801,8 @@ Fill these in from real runs. Leave out any number you didn't measure.
 | Throughput, `hot_account`: strategy A vs B vs C | _TBD_ |
 | Throughput, `hot_account` with sharding (stretch) | _TBD_ |
 | Operations in the concurrency run / reconciliation findings | _TBD_ / 0 |
-| Chaos runs passed | _TBD_ / 5 |
-| Max outbox lag during the broker outage, and drain time | _TBD_ |
+| Chaos runs passed | 2 / 5 so far: C2 and C3 ([results](docs/results/chaos-m4.md)) |
+| Max outbox lag during the broker outage, and drain time | 124 s (18.8k rows) during a 120 s outage; drained 100 s after the broker returned, on a shared laptop ([details](docs/results/chaos-m4.md)) |
 | Hardware used for benchmarks | _TBD_ (always state it) |
 
 ---

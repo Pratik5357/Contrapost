@@ -6,21 +6,22 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Milestone M3:
+Milestone M4:
 - Accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
 - API-key authentication with per-endpoint scopes.
 - Idempotency keys on every money-moving POST. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
 - Holds: authorize, capture in full or in several partial captures, void, or let the Worker expire them.
 - Reversals of transfers and captures: at most once, and subject to overdraft rules.
+- Events: a transactional outbox, relayed to RabbitMQ with publisher confirms, consumed by a statement projector and a low-balance notifier that deduplicate through an inbox. Quorum queues with dead-letter queues hold poison messages.
 
-Not yet: event publishing (M4), reconciliation and rate limiting (M5).
+Not yet: reconciliation, property tests and rate limiting (M5), observability and benchmarks (M6), the admin dashboard (M7).
 
 ## Getting started
 
 Prerequisites: Docker and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bash
-# Run the whole stack: postgres, rabbitmq, redis, migrate (one-shot), api, worker
+# Run the whole stack: postgres, rabbitmq, redis, migrate (one-shot), api, worker, consumers
 docker compose -f deploy/docker-compose.yml up -d --build
 
 curl -i localhost:8080/health/live    # 200 once the process is up
@@ -81,19 +82,27 @@ Tests:
 ```bash
 dotnet test Contrapost.slnx    # unit tests, plus integration tests on PostgreSQL via Testcontainers
 scripts/db-test.sh             # database guard tests (Docker only)
+
+# Chaos runs against a fresh compose stack (design doc §13.3); each ends with exactly-once checks
+tests/chaos/c2-broker-outage.sh   # stop RabbitMQ under load (OUTAGE_SECONDS, default 120)
+tests/chaos/c3-relay-crash.sh     # SIGKILL the relay mid-batch while it drains a backlog (KILLS, default 8)
 ```
+
+RabbitMQ's management UI is at http://localhost:15672 (contrapost / contrapost).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
 | `src/Contrapost.Api` | HTTP API (Minimal APIs, see [ADR-009](docs/adr/ADR-009-minimal-apis.md)); also the `migrate` command |
-| `src/Contrapost.Worker` | Background jobs host |
+| `src/Contrapost.Worker` | Background jobs: hold expiry, outbox relay |
+| `src/Contrapost.Consumers` | Event consumers: statement projector, low-balance notifier |
 | `src/Contrapost.Domain` | Entities and rules, no I/O |
 | `src/Contrapost.Application` | Use cases |
 | `src/Contrapost.Infrastructure` | EF Core, SQL, broker and cache adapters; migrations embed `db/schema.sql` |
-| `db/` | Schema (source of truth) and guard tests |
+| `db/` | Baseline schema, numbered migrations, guard tests |
 | `deploy/` | Docker Compose |
+| `tests/chaos/` | Chaos runs C2 and C3 |
 | `docs/adr/` | Architecture decision records |
 
 ## Development workflow
