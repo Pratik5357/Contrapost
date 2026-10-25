@@ -44,7 +44,7 @@ internal sealed class TransferStore(NpgsqlDataSource dataSource, LedgerSession s
             transaction_id = transfer.Id,
             currency = transfer.Currency,
             reference = transfer.Reference,
-            legs = LedgerSql.LegsPayload(legs),
+            legs = LedgerSql.LegsPayload(legs, locked, applied.Value),
         }, cancellationToken);
 
         await db.CommitAsync(cancellationToken);
@@ -113,7 +113,7 @@ internal sealed class TransferStore(NpgsqlDataSource dataSource, LedgerSession s
             transaction_id = reversalId,
             reverses_transaction_id = transactionId,
             currency = original.Currency,
-            legs = LedgerSql.LegsPayload(legs),
+            legs = LedgerSql.LegsPayload(legs, locked, applied.Value),
         }, cancellationToken);
 
         await db.CommitAsync(cancellationToken);
