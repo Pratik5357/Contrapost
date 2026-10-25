@@ -1,0 +1,24 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,props,csproj,slnx}]
+indent_size = 2
+
+[*.cs]
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_sort_system_directives_first = true
+
+# Generated EF Core migrations
+[**/Migrations/*.cs]
+generated_code = true
+
+[tests/**.cs]
+# Test names read as sentences: Ready_is_unhealthy_until_...
+dotnet_diagnostic.CA1707.severity = none

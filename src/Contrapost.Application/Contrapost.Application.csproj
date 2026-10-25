@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Contrapost.Domain\Contrapost.Domain.csproj" />
+  </ItemGroup>
+</Project>
