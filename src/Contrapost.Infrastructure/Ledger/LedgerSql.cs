@@ -1,6 +1,8 @@
 using System.Text.Json;
+using Contrapost.Application.Observability;
 using Contrapost.Application.Transfers;
 using Contrapost.Domain.Ledger;
+using Contrapost.Infrastructure.Observability;
 using Dapper;
 
 namespace Contrapost.Infrastructure.Ledger;
@@ -15,8 +17,9 @@ internal static class LedgerSql
     /// "not found"; the expiry job passes null to work across clients.
     /// </summary>
     public static async Task<Dictionary<Guid, AccountRow>> LockAccountsAsync(
-        Enlistment db, Guid? clientId, IEnumerable<Guid> accountIds, CancellationToken cancellationToken)
+        Enlistment db, LedgerMetrics metrics, Guid? clientId, IEnumerable<Guid> accountIds, CancellationToken cancellationToken)
     {
+        var started = LedgerMetrics.Start();
         var rows = await db.Connection.QueryAsync<AccountRow>(new CommandDefinition(
             $"""
             SELECT {AccountRow.Columns}
@@ -29,6 +32,7 @@ internal static class LedgerSql
             new { ids = accountIds.Distinct().ToArray(), clientId },
             db.Transaction,
             cancellationToken: cancellationToken));
+        metrics.RecordLockWait(LedgerMetrics.Elapsed(started));
         return rows.ToDictionary(r => r.Id);
     }
 
@@ -103,11 +107,14 @@ internal static class LedgerSql
             db.Transaction,
             cancellationToken: cancellationToken));
 
-    /// <summary>Adds an event to the transactional outbox (design doc §9).</summary>
+    /// <summary>Adds an event to the transactional outbox (design doc §9), with the current trace context (§12).</summary>
     public static Task EnqueueAsync(Enlistment db, Guid aggregateId, string type, object payload, CancellationToken cancellationToken) =>
         db.Connection.ExecuteAsync(new CommandDefinition(
-            "INSERT INTO outbox_messages (id, aggregate_id, type, payload) VALUES (@id, @aggregateId, @type, @payload::jsonb)",
-            new { id = Guid.CreateVersion7(), aggregateId, type, payload = JsonSerializer.Serialize(payload) },
+            """
+            INSERT INTO outbox_messages (id, aggregate_id, type, payload, traceparent)
+            VALUES (@id, @aggregateId, @type, @payload::jsonb, @traceparent)
+            """,
+            new { id = Guid.CreateVersion7(), aggregateId, type, payload = JsonSerializer.Serialize(payload), traceparent = Telemetry.CurrentTraceparent() },
             db.Transaction,
             cancellationToken: cancellationToken));
 

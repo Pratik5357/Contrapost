@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Contrapost.Api.Auth;
 using Contrapost.Application.Idempotency;
+using Contrapost.Application.Observability;
 using Contrapost.Domain;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
@@ -20,7 +21,7 @@ internal sealed record ReplayLocation(string Prefix);
 /// ledger writes. <typeparamref name="TRequest"/> is the endpoint's bound body, re-serialized to
 /// get a canonical form for the request hash; an omitted optional body hashes as <c>null</c>.
 /// </summary>
-internal sealed class IdempotencyFilter<TRequest>(IIdempotencyScope scope, IOptions<JsonOptions> jsonOptions) : IEndpointFilter
+internal sealed class IdempotencyFilter<TRequest>(IIdempotencyScope scope, IOptions<JsonOptions> jsonOptions, LedgerMetrics metrics) : IEndpointFilter
 {
     public const string HeaderName = "Idempotency-Key";
 
@@ -48,6 +49,7 @@ internal sealed class IdempotencyFilter<TRequest>(IIdempotencyScope scope, IOpti
         switch (claim)
         {
             case ClaimResult.Replay replay:
+                metrics.RecordIdempotentReplay();
                 return new ReplayResult(replay.Response, http.GetEndpoint()?.Metadata.GetMetadata<ReplayLocation>());
             case ClaimResult.KeyReused:
                 return new LedgerError(ErrorKind.Rejected, "idempotency-key-reused", "Idempotency key reused",

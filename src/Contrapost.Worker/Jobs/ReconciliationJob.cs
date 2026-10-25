@@ -7,7 +7,8 @@ namespace Contrapost.Worker.Jobs;
 /// Runs reconciliation nightly (design doc §10) and alerts on drift. Several Workers may run this job;
 /// the store's advisory lock lets only one of them reconcile at a time.
 /// </summary>
-internal sealed partial class ReconciliationJob(IServiceScopeFactory scopes, IConfiguration configuration, TimeProvider clock, ILogger<ReconciliationJob> logger)
+internal sealed partial class ReconciliationJob(
+    IServiceScopeFactory scopes, IConfiguration configuration, TimeProvider clock, LedgerHealthMetrics health, ILogger<ReconciliationJob> logger)
     : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -21,6 +22,11 @@ internal sealed partial class ReconciliationJob(IServiceScopeFactory scopes, ICo
             {
                 await using var scope = scopes.CreateAsyncScope();
                 var run = await scope.ServiceProvider.GetRequiredService<IReconciliationStore>().RunAsync(stoppingToken);
+                if (run?.FindingsCount is { } findings)
+                {
+                    health.SetReconciliationFindings(findings);
+                }
+
                 switch (run)
                 {
                     case null:

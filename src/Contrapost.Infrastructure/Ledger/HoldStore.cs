@@ -1,4 +1,5 @@
 using Contrapost.Application.Holds;
+using Contrapost.Application.Observability;
 using Contrapost.Application.Transfers;
 using Contrapost.Domain;
 using Contrapost.Domain.Ledger;
@@ -11,7 +12,7 @@ namespace Contrapost.Infrastructure.Ledger;
 /// Hold lifecycle (design doc §4.4). Lock order is always the hold row(s) first, then the balance
 /// rows in account-id order, so holds can't deadlock with each other, with transfers or with the expiry job.
 /// </summary>
-internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession session) : IHoldStore
+internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession session, LedgerMetrics metrics) : IHoldStore
 {
     private const string HoldColumns = """
         id, debit_account_id, credit_account_id, currency, amount, captured_amount,
@@ -22,7 +23,7 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
     {
         await using var db = await session.EnlistAsync(cancellationToken);
 
-        var locked = await LedgerSql.LockAccountsAsync(db, hold.ClientId, [hold.DebitAccountId, hold.CreditAccountId], cancellationToken);
+        var locked = await LedgerSql.LockAccountsAsync(db, metrics, hold.ClientId, [hold.DebitAccountId, hold.CreditAccountId], cancellationToken);
         var change = HoldRules.Create(hold.Currency, hold.DebitAccountId, hold.CreditAccountId, hold.Amount,
             locked.ToDictionary(kv => kv.Key, kv => kv.Value.ToLocked()));
         if (change.Error is { } rejected)
@@ -76,7 +77,7 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
             return HoldNotFound(holdId);
         }
 
-        var locked = await LedgerSql.LockAccountsAsync(db, clientId, [row.DebitAccountId, row.CreditAccountId], cancellationToken);
+        var locked = await LedgerSql.LockAccountsAsync(db, metrics, clientId, [row.DebitAccountId, row.CreditAccountId], cancellationToken);
         var change = HoldRules.Capture(row.ToState(), amount, row.DbNow,
             locked[row.DebitAccountId].ToLocked(), locked[row.CreditAccountId].ToLocked());
         if (change.Error is { } rejected)
@@ -126,7 +127,7 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
             return HoldNotFound(holdId);
         }
 
-        var locked = await LedgerSql.LockAccountsAsync(db, clientId, [row.DebitAccountId, row.CreditAccountId], cancellationToken);
+        var locked = await LedgerSql.LockAccountsAsync(db, metrics, clientId, [row.DebitAccountId, row.CreditAccountId], cancellationToken);
         var change = HoldRules.Release(row.ToState(), HoldStatus.Voided, row.DbNow,
             locked[row.DebitAccountId].ToLocked(), locked[row.CreditAccountId].ToLocked());
         if (change.Error is { } rejected)
@@ -171,7 +172,7 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
 
         // All balance rows for the batch in one sorted statement, so the expiry job takes balance
         // locks in the same global order as transfers do.
-        var locked = await LedgerSql.LockAccountsAsync(db, null, due.SelectMany(h => new[] { h.DebitAccountId, h.CreditAccountId }), cancellationToken);
+        var locked = await LedgerSql.LockAccountsAsync(db, metrics, null, due.SelectMany(h => new[] { h.DebitAccountId, h.CreditAccountId }), cancellationToken);
         var accounts = locked.ToDictionary(kv => kv.Key, kv => kv.Value.ToLocked());
 
         foreach (var hold in due)

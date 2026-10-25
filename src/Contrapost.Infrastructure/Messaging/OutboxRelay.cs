@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Text.Json;
+using Contrapost.Infrastructure.Observability;
 using Dapper;
 using Npgsql;
 using RabbitMQ.Client;
@@ -30,7 +32,7 @@ public sealed class OutboxRelay(NpgsqlDataSource dataSource, RabbitMqConnection 
 
         var batch = (await connection.QueryAsync<OutboxRow>(new CommandDefinition(
             """
-            SELECT id, aggregate_id, type, payload::text AS payload, created_at
+            SELECT id, aggregate_id, type, payload::text AS payload, created_at, traceparent
             FROM outbox_messages
             WHERE published_at IS NULL AND next_attempt_at <= now()
             ORDER BY created_at
@@ -85,6 +87,14 @@ public sealed class OutboxRelay(NpgsqlDataSource dataSource, RabbitMqConnection 
 
     private static async Task<(Guid Id, Exception? Error)> PublishAsync(IChannel channel, OutboxRow row, CancellationToken cancellationToken)
     {
+        // Continue the trace of the request that wrote the row; the span's id travels in the message headers.
+        using var activity = Telemetry.StartLinked($"{row.Type} publish", ActivityKind.Producer, row.Traceparent);
+        activity?.SetTag("messaging.system", "rabbitmq");
+        activity?.SetTag("messaging.destination.name", Topology.Exchange);
+        activity?.SetTag("messaging.message.id", row.Id.ToString());
+
+        var traceparent = activity?.Id ?? row.Traceparent;
+
         using var payload = JsonDocument.Parse(row.Payload);
         var envelope = new EventEnvelope(row.Id, row.Type, EventEnvelope.ApiSource, row.AggregateId, row.CreatedAt, payload.RootElement);
         var properties = new BasicProperties
@@ -94,6 +104,7 @@ public sealed class OutboxRelay(NpgsqlDataSource dataSource, RabbitMqConnection 
             ContentType = "application/json",
             DeliveryMode = DeliveryModes.Persistent,
             Timestamp = new AmqpTimestamp(row.CreatedAt.ToUnixTimeSeconds()),
+            Headers = traceparent is null ? null : new Dictionary<string, object?> { ["traceparent"] = traceparent },
         };
 
         try
@@ -106,6 +117,7 @@ public sealed class OutboxRelay(NpgsqlDataSource dataSource, RabbitMqConnection 
         }
         catch (Exception ex) when (ex is PublishException or AlreadyClosedException or OperationInterruptedException)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return (row.Id, ex);
         }
     }
@@ -117,5 +129,6 @@ public sealed class OutboxRelay(NpgsqlDataSource dataSource, RabbitMqConnection 
         public string Type { get; init; } = "";
         public string Payload { get; init; } = "";
         public DateTimeOffset CreatedAt { get; init; }
+        public string? Traceparent { get; init; }
     }
 }
