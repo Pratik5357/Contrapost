@@ -38,11 +38,11 @@ internal sealed class IdempotencyFilter<TRequest>(IIdempotencyScope scope, IOpti
             }).ToProblem();
         }
 
-        var body = JsonSerializer.Serialize(context.Arguments.OfType<TRequest>().SingleOrDefault(), json);
+        var canonical = JsonSerializer.Serialize(context.Arguments.OfType<TRequest>().SingleOrDefault(), json);
         var method = http.Request.Method;
         var path = http.Request.Path.Value ?? "";
         var claim = await scope.BeginAsync(
-            new IdempotencyKey(http.GetClientId(), key, method, path, IdempotencyKey.HashRequest(method, path, body)),
+            new IdempotencyKey(http.GetClientId(), key, method, path, IdempotencyKey.HashRequest(method, path, canonical)),
             http.RequestAborted);
 
         switch (claim)
@@ -62,17 +62,34 @@ internal sealed class IdempotencyFilter<TRequest>(IIdempotencyScope scope, IOpti
 
         // Store every outcome the ledger reached, including business rejections, so a retry gets
         // the same answer. Validation failures (400) are not stored; the transaction rolls back.
-        if (result is IStatusCodeHttpResult { StatusCode: { } status } && status != StatusCodes.Status400BadRequest && status < 500)
+        if (result is not IResult executable
+            || result is not IStatusCodeHttpResult { StatusCode: { } status }
+            || status == StatusCodes.Status400BadRequest || status >= 500)
         {
-            var stored = result switch
-            {
-                IValueHttpResult { Value: { } value } => JsonSerializer.Serialize(value, value.GetType(), json),
-                _ => "null",
-            };
-            await scope.CompleteAsync(new StoredResponse(status, stored), http.RequestAborted);
+            return result;
         }
 
-        return result;
+        // Store exactly what gets written, including anything the framework adds while writing
+        // (such as trace_id on Problem Details): run the result into a buffer, store it and commit,
+        // then send the same bytes to the client.
+        var body = http.Response.Body;
+        await using var buffer = new MemoryStream();
+        http.Response.Body = buffer;
+        try
+        {
+            await executable.ExecuteAsync(http);
+        }
+        finally
+        {
+            http.Response.Body = body;
+        }
+
+        var written = buffer.ToArray();
+        await scope.CompleteAsync(
+            new StoredResponse(http.Response.StatusCode, written.Length == 0 ? "null" : Encoding.UTF8.GetString(written)),
+            http.RequestAborted);
+        await body.WriteAsync(written, http.RequestAborted);
+        return Results.Empty;
     }
 
     /// <summary>Writes a stored response with <c>Idempotent-Replayed: true</c>.</summary>

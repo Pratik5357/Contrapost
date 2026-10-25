@@ -76,7 +76,11 @@ public sealed class IdempotencyTests(ApiFixture api)
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, retry.StatusCode);
         Assert.Equal("true", retry.Headers.GetValues("Idempotent-Replayed").Single());
-        Assert.Equal("https://contrapost.dev/errors/insufficient-funds", (await retry.ProblemAsync()).GetProperty("type").GetString());
+        var original = await rejected.ProblemAsync();
+        var replayed = await retry.ProblemAsync();
+        Assert.Equal("https://contrapost.dev/errors/insufficient-funds", replayed.GetProperty("type").GetString());
+        // The replay is what was written the first time, including fields added while writing.
+        Assert.Equal(original.GetProperty("trace_id").GetString(), replayed.GetProperty("trace_id").GetString());
         Assert.Equal(0, (await http.BalanceAsync(bob.Id)).Posted);
     }
 
