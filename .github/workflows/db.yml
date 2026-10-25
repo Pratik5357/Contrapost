@@ -1,0 +1,24 @@
+name: db
+
+on:
+  pull_request:
+    paths:
+      - "db/**"
+      - "scripts/db-test.sh"
+      - ".github/workflows/db.yml"
+  push:
+    branches: [main]
+    paths:
+      - "db/**"
+      - "scripts/db-test.sh"
+      - ".github/workflows/db.yml"
+
+jobs:
+  guards:
+    name: Schema guard tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply schema and run guard tests
+        run: scripts/db-test.sh 16
