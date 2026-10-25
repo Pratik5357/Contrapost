@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace Contrapost.Domain.Ledger;
 
 public sealed record TransferLeg(Guid AccountId, Direction Direction, long Amount);
@@ -70,58 +68,29 @@ public static class TransferRules
     /// <summary>
     /// Checks that need the locked accounts, and returns each account's new balance.
     /// <paramref name="accounts"/> holds only accounts owned by the caller, so a missing id is "not found".
+    /// Reversals may touch frozen or closed accounts but still obey overdraft rules (design doc §4.5).
     /// </summary>
     public static Result<IReadOnlyDictionary<Guid, Balance>> Apply(
         string currency,
         IReadOnlyList<TransferLeg> legs,
-        IReadOnlyDictionary<Guid, LockedAccount> accounts)
+        IReadOnlyDictionary<Guid, LockedAccount> accounts,
+        bool isReversal = false)
     {
         var updated = new Dictionary<Guid, Balance>(legs.Count);
 
         foreach (var leg in legs)
         {
-            if (!accounts.TryGetValue(leg.AccountId, out var account))
+            var usable = AccountChecks.Usable(accounts, leg.AccountId, currency, allowInactive: isReversal);
+            if (usable.Error is { } unusable)
             {
-                return new LedgerError(ErrorKind.NotFound, "account-not-found", "Account not found",
-                    $"Account {leg.AccountId} does not exist.")
-                {
-                    Extensions = new Dictionary<string, object?> { ["account_id"] = leg.AccountId },
-                };
+                return unusable;
             }
 
-            if (account.Currency != currency)
-            {
-                return new LedgerError(ErrorKind.Rejected, "currency-mismatch", "Currency mismatch",
-                    $"Account {account.Id} holds {account.Currency}, but the transfer is in {currency}.")
-                {
-                    Extensions = new Dictionary<string, object?> { ["account_id"] = account.Id },
-                };
-            }
-
-            if (account.Status != AccountStatus.Active)
-            {
-                return new LedgerError(ErrorKind.Rejected, "account-not-active", "Account is not active",
-                    $"Account {account.Id} is {account.Status.ToString().ToLowerInvariant()}.")
-                {
-                    Extensions = new Dictionary<string, object?> { ["account_id"] = account.Id },
-                };
-            }
-
+            var account = usable.Value;
             var balance = account.Balance.Post(leg.Direction, leg.Amount);
-            if (!account.OverdraftRule.Allows(balance))
+            if (AccountChecks.WithinOverdraftRule(account, balance, leg.Direction, leg.Amount) is { } overdrawn)
             {
-                var available = account.Balance.Available(account.NormalSide);
-                var side = leg.Direction.ToString().ToLowerInvariant();
-                return new LedgerError(ErrorKind.Rejected, "insufficient-funds", "Insufficient funds",
-                    string.Create(CultureInfo.InvariantCulture,
-                        $"Available balance {available} is less than the {side} of {leg.Amount}."))
-                {
-                    Extensions = new Dictionary<string, object?>
-                    {
-                        ["account_id"] = account.Id,
-                        ["available"] = available,
-                    },
-                };
+                return overdrawn;
             }
 
             updated[account.Id] = balance;
@@ -129,4 +98,8 @@ public static class TransferRules
 
         return updated;
     }
+
+    /// <summary>The legs of a reversal: the original legs with debit and credit swapped.</summary>
+    public static IReadOnlyList<TransferLeg> Reversed(IEnumerable<TransferLeg> legs) =>
+        legs.Select(l => l with { Direction = l.Direction == Direction.Debit ? Direction.Credit : Direction.Debit }).ToList();
 }
