@@ -9,7 +9,7 @@ internal sealed class AccountRow
     public const string Columns = """
         a.id, a.code, a.currency, a.normal_side::text AS normal_side, a.status::text AS status, a.created_at,
         b.debits_must_not_exceed_credits, b.credits_must_not_exceed_debits,
-        b.debits_posted, b.credits_posted, b.debits_pending, b.credits_pending, b.entry_seq
+        b.debits_posted, b.credits_posted, b.debits_pending, b.credits_pending, b.entry_seq, b.version
         """;
 
     public Guid Id { get; init; }
@@ -25,6 +25,7 @@ internal sealed class AccountRow
     public long DebitsPending { get; init; }
     public long CreditsPending { get; init; }
     public long EntrySeq { get; init; }
+    public long Version { get; init; }
 
     public Balance Balance => new(DebitsPosted, CreditsPosted, DebitsPending, CreditsPending);
 
