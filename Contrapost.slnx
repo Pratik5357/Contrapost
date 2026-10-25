@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/bench/">
+    <Project Path="bench/Contrapost.Benchmarks/Contrapost.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Contrapost.Api/Contrapost.Api.csproj" />
     <Project Path="src/Contrapost.Application/Contrapost.Application.csproj" />
