@@ -9,6 +9,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Contrapost.IntegrationTests/Contrapost.IntegrationTests.csproj" />
+    <Project Path="tests/Contrapost.PropertyTests/Contrapost.PropertyTests.csproj" />
     <Project Path="tests/Contrapost.UnitTests/Contrapost.UnitTests.csproj" />
   </Folder>
 </Solution>
