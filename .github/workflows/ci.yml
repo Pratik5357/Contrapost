@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore Contrapost.slnx
+      - name: Check formatting
+        run: dotnet format Contrapost.slnx --verify-no-changes --no-restore
+      - name: Build
+        run: dotnet build Contrapost.slnx --configuration Release --no-restore
+      # Integration tests start PostgreSQL with Testcontainers (Docker is available on the runner)
+      - name: Test
+        run: dotnet test Contrapost.slnx --configuration Release --no-build --logger "console;verbosity=normal"
+
+  images:
+    name: Build container images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build api image
+        run: docker build -f src/Contrapost.Api/Dockerfile -t contrapost-api:${{ github.sha }} .
+      - name: Build worker image
+        run: docker build -f src/Contrapost.Worker/Dockerfile -t contrapost-worker:${{ github.sha }} .
