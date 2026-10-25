@@ -43,3 +43,5 @@ jobs:
         run: docker build -f src/Contrapost.Api/Dockerfile -t contrapost-api:${{ github.sha }} .
       - name: Build worker image
         run: docker build -f src/Contrapost.Worker/Dockerfile -t contrapost-worker:${{ github.sha }} .
+      - name: Build consumers image
+        run: docker build -f src/Contrapost.Consumers/Dockerfile -t contrapost-consumers:${{ github.sha }} .
