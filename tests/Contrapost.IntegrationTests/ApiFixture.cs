@@ -12,6 +12,7 @@ using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
+using Testcontainers.Redis;
 
 namespace Contrapost.IntegrationTests;
 
@@ -26,15 +27,18 @@ public sealed class ApiFixture : IAsyncLifetime
 
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16").Build();
     private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder("rabbitmq:4.1-management").Build();
+    private readonly RedisContainer _redis = new RedisBuilder("redis:7.4").Build();
     private WebApplicationFactory<Program>? _factory;
 
     public string ConnectionString => _postgres.GetConnectionString();
 
     public string RabbitUri => _rabbit.GetConnectionString();
 
+    public string RedisConnectionString => _redis.GetConnectionString();
+
     public async Task InitializeAsync()
     {
-        await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync());
+        await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync(), _redis.StartAsync());
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
@@ -54,6 +58,35 @@ public sealed class ApiFixture : IAsyncLifetime
 
         await _postgres.DisposeAsync();
         await _rabbit.DisposeAsync();
+        await _redis.DisposeAsync();
+    }
+
+    /// <summary>
+    /// A separate API host with extra settings, sharing this fixture's database. The shared host has no
+    /// Redis, so rate limiting is off there; tests that need it build their own host with this.
+    /// </summary>
+    public WebApplicationFactory<Program> CreateApi(IReadOnlyDictionary<string, string?> settings) =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
+            builder.UseSetting("ApiKeys:Environment", "test");
+            foreach (var (key, value) in settings)
+            {
+                builder.UseSetting(key, value);
+            }
+        });
+
+    /// <summary>Inserts a client with its own key and rate limit, and returns an HttpClient for it on <paramref name="host"/>.</summary>
+    public async Task<TestClient> NewTestClientOnAsync(WebApplicationFactory<Program> host, int rateLimitPerMinute)
+    {
+        var clientId = Guid.CreateVersion7();
+        var key = ApiKeys.Generate("test");
+        await ScalarAsync<int>(
+            "INSERT INTO api_clients (id, name, key_prefix, key_hash, scopes, rate_limit_rpm) VALUES (@id, 'test', @prefix, @hash, @scopes, @rpm) RETURNING 1",
+            ("id", clientId), ("prefix", key.Prefix), ("hash", key.SecretHash), ("scopes", Scopes.All.ToArray()), ("rpm", rateLimitPerMinute));
+        var http = host.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key.Key);
+        return new TestClient(http, clientId, key);
     }
 
     /// <summary>The services the Worker and Consumers processes run with (relay, inbox, handlers), unstarted.</summary>
