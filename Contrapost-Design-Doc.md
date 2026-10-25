@@ -632,7 +632,7 @@ Reconciliation never takes locks (`REPEATABLE READ, READ ONLY`). The per-account
 
 ## 12. Observability
 
-**Traces:** one trace per request, from the API through the DB transaction to the outbox. The relay continues the trace using the `traceparent` header stored in the outbox payload, so a single transfer can be followed through to the consumer.
+**Traces:** one trace per transfer, across three processes. ASP.NET Core and Npgsql spans cover the request and its database work. The request's W3C trace context is stored on the outbox row (`outbox_messages.traceparent`, migration 004). The relay starts a producer span `<type> publish` from it and puts that span's `traceparent` in the message headers. Each consumer continues the trace with a consumer span `<type> process`, and its inbox and projection queries are traced under it. A client that sends its own `traceparent` gets its trace continued.
 
 **Metrics (Prometheus):**
 
@@ -644,14 +644,37 @@ Reconciliation never takes locks (`REPEATABLE READ, READ ONLY`). The per-account
 | `ledger_idempotent_replays_total` | counter |
 | `ledger_outbox_lag_seconds` | gauge (age of oldest unpublished row) |
 | `ledger_outbox_unpublished` | gauge |
-| `ledger_reconciliation_findings` | gauge |
+| `ledger_reconciliation_findings` | gauge (−1 before the first run) |
 | `ledger_rate_limited_total` | counter |
+| `ledger_rate_limiter_failed_open_total` | counter |
 
-**Grafana dashboard:** throughput, latency percentiles, lock waits, outbox lag, reconciliation status and error rates.
+The API also exports ASP.NET Core's `http_server_request_duration_seconds`, and every process exports Npgsql (`db_client_*`) and .NET runtime metrics. The outbox and reconciliation gauges come from the Worker, which samples the backlog every 5 s.
 
-**Alerts:** reconciliation drift above 0, outbox lag over 60 s, p99 latency over the target, 5xx rate over 1%.
+**Pipeline (local):**
+- Every process exports OTLP to an OpenTelemetry Collector.
+- The Collector sends traces to Tempo and exposes metrics for Prometheus to scrape.
+- Grafana reads both.
 
-**Logs:** structured logs (Serilog, JSON) with `trace_id`, `client_id`, `transaction_id` and `idempotency_key`.
+The Compose configs are in `deploy/observability/` and are baked into images rather than bind-mounted.
+
+**Grafana dashboard** (`deploy/observability/grafana/contrapost.json`, the Grafana home page):
+- health stats: transfer rate, p99, 5xx rate, outbox backlog and lag, reconciliation findings
+- transfers by result
+- p50/p95/p99 transfer latency and lock-wait latency
+- requests by status
+- idempotent replays and rate limiting
+- database latency
+- outbox backlog and lag over time
+
+**Alerts** (`deploy/observability/alerts.yml`, evaluated by Prometheus):
+- reconciliation drift above 0
+- outbox lag over 60 s
+- transfer p99 over the 500 ms target
+- 5xx rate over 1%
+
+Routing them to people needs an Alertmanager, which isn't part of the local stack.
+
+**Logs:** in containers, JSON on stdout through the .NET console formatter, with scopes that carry `TraceId` and `SpanId`, so a log line links to its trace. Not done yet: shipping logs to Loki, and adding `client_id`, `transaction_id` and `idempotency_key` to the log scopes.
 
 ---
 

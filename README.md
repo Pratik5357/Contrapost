@@ -6,7 +6,7 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Milestone M5:
+Milestone M6 (in progress):
 - Accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
 - API-key authentication with per-endpoint scopes.
 - Idempotency keys on every money-moving POST. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
@@ -17,7 +17,9 @@ Milestone M5:
 - Reconciliation of invariants I1–I8, nightly in the Worker or on demand, with the results readable at `/v1/admin/reconciliation/*`.
 - Verification: a headline concurrency test (random mixed operations, then a reconciliation that must be clean) and FsCheck property tests of the domain rules.
 
-Not yet: observability and benchmarks (M6), the admin dashboard (M7).
+- Observability: OpenTelemetry traces (one trace per transfer, from the API through the outbox relay to the consumers), the `ledger_*` metrics, and a Grafana dashboard with Prometheus alerts.
+
+Not yet: load tests, the locking-strategy benchmark and the remaining chaos runs (rest of M6), the admin dashboard (M7).
 
 ## Getting started
 
@@ -98,7 +100,15 @@ tests/chaos/c2-broker-outage.sh   # stop RabbitMQ under load (OUTAGE_SECONDS, de
 tests/chaos/c3-relay-crash.sh     # SIGKILL the relay mid-batch while it drains a backlog (KILLS, default 8)
 ```
 
-RabbitMQ's management UI is at http://localhost:15672 (contrapost / contrapost).
+Local tools:
+
+| Tool | URL |
+|---|---|
+| Grafana (dashboard and traces) | http://localhost:3300 |
+| Prometheus (metrics and alerts) | http://localhost:9090 |
+| RabbitMQ management (contrapost / contrapost) | http://localhost:15672 |
+
+Grafana is on 3300 because 3000 is often taken by a frontend dev server.
 
 ## Repository layout
 
