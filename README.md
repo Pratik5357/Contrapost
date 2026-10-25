@@ -19,7 +19,9 @@ Milestone M6 (in progress):
 
 - Observability: OpenTelemetry traces (one trace per transfer, from the API through the outbox relay to the consumers), the `ledger_*` metrics, and a Grafana dashboard with Prometheus alerts.
 
-Not yet: load tests, the locking-strategy benchmark and the remaining chaos runs (rest of M6), the admin dashboard (M7).
+- Load tests: k6 scenarios for uniform, hot-account, retry-storm and mixed traffic, with a 60-second smoke run in CI ([results](docs/results/load-m6.md)).
+
+Not yet: the locking-strategy benchmark and the remaining chaos runs (rest of M6), the admin dashboard (M7).
 
 ## Getting started
 
@@ -98,6 +100,10 @@ scripts/db-test.sh             # database guard tests (Docker only)
 # Chaos runs against a fresh compose stack (design doc §13.3); each ends with exactly-once checks
 tests/chaos/c2-broker-outage.sh   # stop RabbitMQ under load (OUTAGE_SECONDS, default 120)
 tests/chaos/c3-relay-crash.sh     # SIGKILL the relay mid-batch while it drains a backlog (KILLS, default 8)
+
+# Load scenarios with k6 (design doc §13.2): uniform | hot_account | retry_storm | mixed
+tests/load/run.sh mixed                       # light by default: 5 users for 30 s
+VUS=32 DURATION=2m tests/load/run.sh uniform  # heavier, opt-in
 ```
 
 Local tools:
