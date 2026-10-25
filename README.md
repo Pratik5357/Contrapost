@@ -6,7 +6,48 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Design phase. The service has not been built yet.
+Milestone M0 (skeleton): the solution builds, the database schema migrates, and the API serves health checks. No ledger endpoints yet.
+
+## Getting started
+
+Prerequisites: Docker and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+
+```bash
+# Run the whole stack: postgres, rabbitmq, redis, migrate (one-shot), api, worker
+docker compose -f deploy/docker-compose.yml up -d --build
+
+curl -i localhost:8080/health/live    # 200 once the process is up
+curl -i localhost:8080/health/ready   # 200 once the database is reachable and migrated
+```
+
+Develop against the containerised infrastructure:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d postgres rabbitmq redis
+dotnet tool restore
+dotnet run --project src/Contrapost.Api -- migrate   # apply migrations, then exit
+dotnet run --project src/Contrapost.Api
+```
+
+Tests:
+
+```bash
+dotnet test Contrapost.slnx    # integration tests start their own PostgreSQL via Testcontainers
+scripts/db-test.sh             # database guard tests (Docker only)
+```
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/Contrapost.Api` | HTTP API (Minimal APIs, see [ADR-009](docs/adr/ADR-009-minimal-apis.md)); also the `migrate` command |
+| `src/Contrapost.Worker` | Background jobs host |
+| `src/Contrapost.Domain` | Entities and rules, no I/O |
+| `src/Contrapost.Application` | Use cases |
+| `src/Contrapost.Infrastructure` | EF Core, SQL, broker and cache adapters; migrations embed `db/schema.sql` |
+| `db/` | Schema (source of truth) and guard tests |
+| `deploy/` | Docker Compose |
+| `docs/adr/` | Architecture decision records |
 
 ## Development workflow
 
