@@ -6,7 +6,9 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Milestone M0 (skeleton): the solution builds, the database schema migrates, and the API serves health checks. No ledger endpoints yet.
+Milestone M1: accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
+
+Not yet: API keys and idempotency (M2), holds and reversals (M3), event publishing (M4). Until M2, clients are identified by a temporary `X-Client-Id` header that is enabled only in Development, tests and the local Compose stack.
 
 ## Getting started
 
@@ -20,6 +22,28 @@ curl -i localhost:8080/health/live    # 200 once the process is up
 curl -i localhost:8080/health/ready   # 200 once the database is reachable and migrated
 ```
 
+Try the API (the seed creates a demo client):
+
+```bash
+scripts/seed.sh
+H='X-Client-Id: 11111111-1111-1111-1111-111111111111'
+
+curl -s -H "$H" -H 'Content-Type: application/json' localhost:8080/v1/accounts \
+  -d '{"code":"funding:INR","currency":"INR","normal_side":"debit","prevent_overdraft":false}'
+curl -s -H "$H" -H 'Content-Type: application/json' localhost:8080/v1/accounts \
+  -d '{"code":"wallet:alice","currency":"INR","normal_side":"credit"}'
+
+curl -s -H "$H" -H 'Content-Type: application/json' localhost:8080/v1/transfers \
+  -d '{"currency":"INR","reference":"top-up-1","legs":[
+        {"account_id":"<funding id>","direction":"debit","amount":100000},
+        {"account_id":"<alice id>","direction":"credit","amount":100000}]}'
+
+curl -s -H "$H" localhost:8080/v1/accounts/<alice id>/balance
+curl -s -H "$H" "localhost:8080/v1/accounts/<alice id>/entries?limit=20"
+```
+
+Amounts are integers in minor units (paise), so `100000` is ₹1,000.
+
 Develop against the containerised infrastructure:
 
 ```bash
@@ -32,7 +56,7 @@ dotnet run --project src/Contrapost.Api
 Tests:
 
 ```bash
-dotnet test Contrapost.slnx    # integration tests start their own PostgreSQL via Testcontainers
+dotnet test Contrapost.slnx    # unit tests, plus integration tests on PostgreSQL via Testcontainers
 scripts/db-test.sh             # database guard tests (Docker only)
 ```
 
