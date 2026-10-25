@@ -45,6 +45,17 @@ Retries back off with jitter and give up after 10 attempts.
 - **All three are correct.** Every cell reconciled clean. Under `SERIALIZABLE`, colliding writers sometimes hit the postings `(account_id, account_seq)` unique index before Postgres reports a serialization failure. The M1 database guard caught it, and C treats it as a retryable conflict.
 - **The limit is the hot account itself.** Even A tops out at a pool of 2, because transfers on the same two rows run one at a time. That's the case for hot-account sharding (§8.2).
 
+## Reproducibility
+
+The workflow ran a second time on the next push (run 40202491332). That runner was about 40% faster in absolute terms (GitHub runners vary), but every conclusion held:
+
+| Pool of 2 | A pessimistic | B optimistic | C serializable |
+|---|---|---|---|
+| Run 1 (published above) | 388/s, p99 30 ms, 0 abandoned | 285/s, p99 140 ms, 243 abandoned | 28/s, p99 5.1 s |
+| Run 2 | 535/s, p99 20 ms, 0 abandoned | 398/s, p99 126 ms, 242 abandoned | 1.8/s, p99 18.1 s |
+
+At a pool of 1,000, the three were again close (1,013–1,268/s), with A slightly ahead this time. Compare strategies within a run, not absolute numbers across runs.
+
 ## Decision
 
 Keep **A** in production ([ADR-003](../adr/ADR-003-pessimistic-ordered-locking.md)). It is never slower than the alternatives by more than measurement noise, it is much better under contention, and it never abandons a transfer.
