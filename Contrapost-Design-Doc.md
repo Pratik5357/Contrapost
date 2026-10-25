@@ -763,7 +763,7 @@ Fill these in from real runs. Leave out any number you didn't measure.
 | `postings` table growth slows reconciliation | Chunked scans; consider monthly partitioning if it gets large |
 | Free-tier hosting distorts benchmarks | Benchmark locally on stated hardware; the cloud deploy is for the demo only |
 | Outbox table bloat | Cleanup job and a partial index on unpublished rows |
-| **Open:** controllers or Minimal APIs? | Pick one in M0 and record it in an ADR |
+| ~~Open:~~ controllers or Minimal APIs? | **Decided:** Minimal APIs, see [ADR-009](docs/adr/ADR-009-minimal-apis.md) |
 | **Open:** should balances also be cached in Redis for reads? | Default **no**: balances are always read from Postgres to avoid stale values |
 
 ---
