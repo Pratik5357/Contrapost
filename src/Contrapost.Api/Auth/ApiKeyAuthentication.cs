@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using Contrapost.Application.Clients;
@@ -18,6 +19,7 @@ internal sealed class ApiKeyAuthenticationHandler(
     public const string SchemeName = "ApiKey";
     public const string ClientIdClaim = "client_id";
     public const string ScopeClaim = "scope";
+    public const string RateLimitClaim = "rate_limit_rpm";
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -42,6 +44,7 @@ internal sealed class ApiKeyAuthenticationHandler(
 
         var claims = client.Scopes
             .Select(scope => new Claim(ScopeClaim, scope))
+            .Prepend(new Claim(RateLimitClaim, client.RateLimitPerMinute.ToString(CultureInfo.InvariantCulture)))
             .Prepend(new Claim(ClientIdClaim, client.ClientId.ToString()));
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, SchemeName));
         return AuthenticateResult.Success(new AuthenticationTicket(principal, SchemeName));

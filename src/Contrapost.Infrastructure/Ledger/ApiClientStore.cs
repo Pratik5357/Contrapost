@@ -10,10 +10,10 @@ internal sealed class ApiClientStore(NpgsqlDataSource dataSource) : IApiClientSt
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         var row = await connection.QuerySingleOrDefaultAsync<ClientRow>(new CommandDefinition(
-            "SELECT id, key_hash, scopes FROM api_clients WHERE key_prefix = @prefix AND revoked_at IS NULL",
+            "SELECT id, key_hash, scopes, rate_limit_rpm FROM api_clients WHERE key_prefix = @prefix AND revoked_at IS NULL",
             new { prefix },
             cancellationToken: cancellationToken));
-        return row is null ? null : new ApiClientCredentials(row.Id, row.KeyHash, row.Scopes);
+        return row is null ? null : new ApiClientCredentials(row.Id, row.KeyHash, row.Scopes, row.RateLimitRpm);
     }
 
     public async Task CreateAsync(Guid clientId, string name, ApiKeys.Generated key, IReadOnlyList<string> scopes, CancellationToken cancellationToken)
@@ -33,5 +33,6 @@ internal sealed class ApiClientStore(NpgsqlDataSource dataSource) : IApiClientSt
         public Guid Id { get; init; }
         public byte[] KeyHash { get; init; } = [];
         public string[] Scopes { get; init; } = [];
+        public int RateLimitRpm { get; init; }
     }
 }
