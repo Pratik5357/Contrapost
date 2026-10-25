@@ -20,12 +20,23 @@ public sealed record NewTransfer(
 
 public sealed record LegView(Guid AccountId, Direction Direction, long Amount, long AccountSeq);
 
+public enum TransactionKind
+{
+    Transfer,
+    Capture,
+    Reversal,
+}
+
+/// <summary>A posted transaction of any kind. <c>/v1/transfers/{id}</c> serves all three.</summary>
 public sealed record TransferView(
     Guid Id,
+    TransactionKind Kind,
     string Status,
     string Currency,
     string? Reference,
     string? Description,
+    Guid? HoldId,
+    Guid? ReversesTransactionId,
     DateTimeOffset CreatedAt,
     IReadOnlyList<LegView> Legs);
 
@@ -39,6 +50,12 @@ public interface ITransferStore
     Task<Result<TransferView>> PostAsync(NewTransfer transfer, CancellationToken cancellationToken);
 
     Task<TransferView?> GetAsync(Guid clientId, Guid transferId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Posts the swapped legs of a transfer or capture as a reversal (design doc §4.5): overdraft
+    /// rules apply, frozen and closed accounts are allowed, and a transaction is reversed at most once.
+    /// </summary>
+    Task<Result<TransferView>> ReverseAsync(Guid clientId, Guid transactionId, Guid reversalId, string? description, CancellationToken cancellationToken);
 }
 
 public sealed class TransferService(ITransferStore store)
@@ -87,4 +104,14 @@ public sealed class TransferService(ITransferStore store)
 
     public Task<TransferView?> GetAsync(Guid clientId, Guid transferId, CancellationToken cancellationToken) =>
         store.GetAsync(clientId, transferId, cancellationToken);
+
+    public async Task<Result<TransferView>> ReverseAsync(Guid clientId, Guid transactionId, string? description, CancellationToken cancellationToken)
+    {
+        if (description is { Length: > MaxDescriptionLength })
+        {
+            return LedgerError.Validation(new Dictionary<string, string[]> { ["description"] = [$"At most {MaxDescriptionLength} characters."] });
+        }
+
+        return await store.ReverseAsync(clientId, transactionId, Guid.CreateVersion7(), description, cancellationToken);
+    }
 }

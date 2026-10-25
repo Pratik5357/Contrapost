@@ -103,6 +103,22 @@ internal sealed class LedgerSession(NpgsqlDataSource dataSource, IdempotencySett
         await EndAsync();
     }
 
+    /// <summary>
+    /// The transaction a store should write in: the idempotent request's transaction when one is
+    /// active (committed later by <see cref="CompleteAsync"/>), otherwise a new one the store owns.
+    /// </summary>
+    public async Task<Enlistment> EnlistAsync(CancellationToken cancellationToken)
+    {
+        if (Transaction is not null)
+        {
+            return new Enlistment(Transaction, owned: false);
+        }
+
+        var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        // READ COMMITTED is enough: every value a decision depends on is read under FOR UPDATE.
+        return new Enlistment(await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken), owned: true);
+    }
+
     public ValueTask DisposeAsync() => new(EndAsync());
 
     /// <summary>Rolls back anything uncommitted and releases the connection.</summary>
@@ -127,5 +143,27 @@ internal sealed class LedgerSession(NpgsqlDataSource dataSource, IdempotencySett
         public byte[] RequestHash { get; init; } = [];
         public int? ResponseCode { get; init; }
         public string? ResponseBody { get; init; }
+    }
+}
+
+/// <summary>A store's handle on its transaction; commits and disposes only what it owns.</summary>
+internal sealed class Enlistment(NpgsqlTransaction transaction, bool owned) : IAsyncDisposable
+{
+    // Captured up front: NpgsqlTransaction.Connection becomes null once the transaction completes.
+    public NpgsqlConnection Connection { get; } = transaction.Connection!;
+
+    public NpgsqlTransaction Transaction => transaction;
+
+    /// <summary>Commits if this enlistment owns the transaction; the deferred balance triggers run here.</summary>
+    public Task CommitAsync(CancellationToken cancellationToken) =>
+        owned ? transaction.CommitAsync(cancellationToken) : Task.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (owned)
+        {
+            await transaction.DisposeAsync();
+            await Connection.DisposeAsync();
+        }
     }
 }

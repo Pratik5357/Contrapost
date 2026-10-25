@@ -1,5 +1,6 @@
 using Contrapost.Application.Accounts;
 using Contrapost.Application.Clients;
+using Contrapost.Application.Holds;
 using Contrapost.Application.Idempotency;
 using Contrapost.Application.Transfers;
 using Contrapost.Infrastructure.Ledger;
@@ -29,6 +30,7 @@ public static class DependencyInjection
 
         services.AddScoped<IAccountStore, AccountStore>();
         services.AddScoped<ITransferStore, TransferStore>();
+        services.AddScoped<IHoldStore, HoldStore>();
         services.AddScoped<IApiClientStore, ApiClientStore>();
 
         services.AddSingleton(new IdempotencySettings(

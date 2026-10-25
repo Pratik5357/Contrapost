@@ -6,12 +6,14 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Milestone M2:
+Milestone M3:
 - Accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
 - API-key authentication with per-endpoint scopes.
-- Idempotency keys on transfers. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
+- Idempotency keys on every money-moving POST. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
+- Holds: authorize, capture in full or in several partial captures, void, or let the Worker expire them.
+- Reversals of transfers and captures: at most once, and subject to overdraft rules.
 
-Not yet: holds and reversals (M3), event publishing (M4), reconciliation and rate limiting (M5).
+Not yet: event publishing (M4), reconciliation and rate limiting (M5).
 
 ## Getting started
 
@@ -47,6 +49,21 @@ curl -s -H "$H" "localhost:8080/v1/accounts/<alice id>/entries?limit=20"
 ```
 
 Amounts are integers in minor units (paise), so `100000` is ₹1,000.
+
+Holds and reversals:
+
+```bash
+# Reserve ₹300 from alice for a merchant; expires in an hour unless captured or voided
+curl -s -H "$H" -H 'Content-Type: application/json' -H 'Idempotency-Key: hold-1' localhost:8080/v1/holds \
+  -d '{"debit_account_id":"<alice id>","credit_account_id":"<merchant id>","currency":"INR","amount":30000,"expires_in_seconds":3600}'
+
+curl -s -H "$H" -H 'Content-Type: application/json' -H 'Idempotency-Key: cap-1' \
+  localhost:8080/v1/holds/<hold id>/capture -d '{"amount":10000}'     # omit amount to capture the rest
+curl -s -H "$H" -H 'Idempotency-Key: void-1' -X POST localhost:8080/v1/holds/<hold id>/void
+
+# Undo a transfer or capture with a reversal transaction
+curl -s -H "$H" -H 'Idempotency-Key: undo-1' -X POST localhost:8080/v1/transfers/<transfer id>/reversal
+```
 
 Create clients with other scopes directly: `docker compose -f deploy/docker-compose.yml run --rm migrate create-client <name> [scope ...]`, where the scopes are `accounts:read accounts:write transfers:write holds:write admin:read`.
 

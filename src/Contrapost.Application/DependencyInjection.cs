@@ -1,4 +1,5 @@
 using Contrapost.Application.Accounts;
+using Contrapost.Application.Holds;
 using Contrapost.Application.Transfers;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -10,6 +11,7 @@ public static class DependencyInjection
     {
         services.AddScoped<AccountService>();
         services.AddScoped<TransferService>();
+        services.AddScoped<HoldService>();
         return services;
     }
 }

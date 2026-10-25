@@ -67,6 +67,7 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
 app.MapGroup("/v1")
     .RequireAuthorization()
     .MapAccountEndpoints()
-    .MapTransferEndpoints();
+    .MapTransferEndpoints()
+    .MapHoldEndpoints();
 
 await app.RunAsync();

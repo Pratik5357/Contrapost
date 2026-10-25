@@ -1,3 +1,4 @@
+using Contrapost.Application.Transfers;
 using Contrapost.Domain.Ledger;
 
 namespace Contrapost.Infrastructure.Ledger;
@@ -11,6 +12,32 @@ internal static class PgEnum
     public static string ToLabel(Direction value) => value == Direction.Debit ? "debit" : "credit";
 
     public static string ToLabel(NormalSide value) => value == NormalSide.Debit ? "debit" : "credit";
+
+    public static string ToLabel(TransactionKind value) => value switch
+    {
+        TransactionKind.Transfer => "transfer",
+        TransactionKind.Capture => "capture",
+        TransactionKind.Reversal => "reversal",
+        _ => throw new ArgumentOutOfRangeException(nameof(value), value, null),
+    };
+
+    public static TransactionKind ToTransactionKind(string label) => label switch
+    {
+        "transfer" => TransactionKind.Transfer,
+        "capture" => TransactionKind.Capture,
+        "reversal" => TransactionKind.Reversal,
+        _ => throw new FormatException($"Unknown transaction kind '{label}'."),
+    };
+
+    public static HoldStatus ToHoldStatus(string label) => label switch
+    {
+        "pending" => HoldStatus.Pending,
+        "partially_captured" => HoldStatus.PartiallyCaptured,
+        "captured" => HoldStatus.Captured,
+        "voided" => HoldStatus.Voided,
+        "expired" => HoldStatus.Expired,
+        _ => throw new FormatException($"Unknown hold status '{label}'."),
+    };
 
     public static Direction ToDirection(string label) => label switch
     {

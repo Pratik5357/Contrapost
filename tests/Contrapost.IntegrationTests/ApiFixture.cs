@@ -68,6 +68,14 @@ public sealed class ApiFixture : IAsyncLifetime
 
     public HttpClient AnonymousClient() => _factory!.CreateClient();
 
+    /// <summary>Runs one expiry batch the way the Worker's job does.</summary>
+    public async Task<int> ExpireDueHoldsAsync()
+    {
+        await using var scope = _factory!.Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<Contrapost.Application.Holds.IHoldStore>()
+            .ExpireDueAsync(100, CancellationToken.None);
+    }
+
     public async Task<T> ScalarAsync<T>(string sql, params (string Name, object Value)[] parameters)
     {
         await using var connection = new NpgsqlConnection(ConnectionString);
@@ -99,7 +107,13 @@ public static class LedgerApi
 
     public sealed record Leg(Guid AccountId, string Direction, long Amount, long AccountSeq);
 
-    public sealed record Transfer(Guid Id, string Status, string Currency, string? Reference, IReadOnlyList<Leg> Legs);
+    public sealed record Transfer(Guid Id, string Status, string Currency, string? Reference, IReadOnlyList<Leg> Legs,
+        string Kind = "", Guid? HoldId = null, Guid? ReversesTransactionId = null);
+
+    public sealed record Hold(Guid Id, string Status, Guid DebitAccountId, Guid CreditAccountId, string Currency,
+        long Amount, long CapturedAmount, long Remaining, DateTimeOffset ExpiresAt);
+
+    public sealed record Capture(Hold Hold, Transfer Transaction);
 
     public sealed record Entry(Guid TransactionId, long AccountSeq, string Direction, long Amount);
 
@@ -150,6 +164,36 @@ public static class LedgerApi
         response.EnsureSuccessStatusCode();
         return wallet;
     }
+
+    public static Task<HttpResponseMessage> PostHoldAsync(this HttpClient http, Guid debit, Guid credit, long amount,
+        int? expiresInSeconds = null, string currency = "INR") =>
+        http.PostWithKeyAsync("/v1/holds", Guid.NewGuid().ToString(), new
+        {
+            debit_account_id = debit,
+            credit_account_id = credit,
+            currency,
+            amount,
+            expires_in_seconds = expiresInSeconds,
+        });
+
+    public static async Task<Hold> CreateHoldAsync(this HttpClient http, Guid debit, Guid credit, long amount, int? expiresInSeconds = null)
+    {
+        var response = await http.PostHoldAsync(debit, credit, amount, expiresInSeconds);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<Hold>(ApiFixture.Json))!;
+    }
+
+    public static Task<HttpResponseMessage> CaptureAsync(this HttpClient http, Guid holdId, long? amount = null, string? idempotencyKey = null) =>
+        http.PostWithKeyAsync($"/v1/holds/{holdId}/capture", idempotencyKey ?? Guid.NewGuid().ToString(), new { amount });
+
+    public static Task<HttpResponseMessage> VoidAsync(this HttpClient http, Guid holdId) =>
+        http.PostWithKeyAsync($"/v1/holds/{holdId}/void", Guid.NewGuid().ToString(), new { });
+
+    public static Task<HttpResponseMessage> ReverseAsync(this HttpClient http, Guid transactionId, string? idempotencyKey = null) =>
+        http.PostWithKeyAsync($"/v1/transfers/{transactionId}/reversal", idempotencyKey ?? Guid.NewGuid().ToString(), new { });
+
+    public static async Task<Hold> HoldAsync(this HttpClient http, Guid holdId) =>
+        (await http.GetFromJsonAsync<Hold>($"/v1/holds/{holdId}", ApiFixture.Json))!;
 
     public static async Task<Balance> BalanceAsync(this HttpClient http, Guid accountId) =>
         (await http.GetFromJsonAsync<Balance>($"/v1/accounts/{accountId}/balance", ApiFixture.Json))!;

@@ -1,5 +1,3 @@
-using System.Data;
-using System.Text.Json;
 using Contrapost.Application.Transfers;
 using Contrapost.Domain;
 using Contrapost.Domain.Ledger;
@@ -13,139 +11,152 @@ internal sealed class TransferStore(NpgsqlDataSource dataSource, LedgerSession s
 {
     public async Task<Result<TransferView>> PostAsync(NewTransfer transfer, CancellationToken cancellationToken)
     {
-        // Under an idempotency key the request's transaction is already open and is committed
-        // by the idempotency scope together with the stored response; otherwise use our own.
-        await using var own = session.Transaction is null ? await dataSource.OpenConnectionAsync(cancellationToken) : null;
-        // READ COMMITTED is enough: every value a decision depends on is read under FOR UPDATE.
-        await using var ownTransaction = own is null ? null : await own.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
-        var transaction = session.Transaction ?? ownTransaction!;
-        var connection = transaction.Connection!;
+        await using var db = await session.EnlistAsync(cancellationToken);
 
-        // Postgres locks rows in the ORDER BY order (LockRows sits above Sort), so two
-        // transfers over the same accounts always lock them in the same order and can't deadlock.
-        // Accounts of other clients are filtered out here and surface as "not found".
-        var locked = (await connection.QueryAsync<AccountRow>(new CommandDefinition(
-            $"""
-            SELECT {AccountRow.Columns}
-            FROM account_balances b
-            JOIN accounts a ON a.id = b.account_id
-            WHERE b.account_id = ANY(@ids) AND a.client_id = @ClientId
-            ORDER BY b.account_id
-            FOR UPDATE OF b
-            """,
-            new { ids = transfer.Legs.Select(l => l.AccountId).ToArray(), transfer.ClientId },
-            transaction,
-            cancellationToken: cancellationToken))).ToDictionary(r => r.Id);
-
-        var applied = TransferRules.Apply(
-            transfer.Currency,
-            transfer.Legs,
-            locked.ToDictionary(kv => kv.Key, kv => kv.Value.ToLocked()));
+        var locked = await LedgerSql.LockAccountsAsync(db, transfer.ClientId, transfer.Legs.Select(l => l.AccountId), cancellationToken);
+        var applied = TransferRules.Apply(transfer.Currency, transfer.Legs, locked.ToDictionary(kv => kv.Key, kv => kv.Value.ToLocked()));
         if (applied.Error is { } rejected)
         {
             return rejected;
         }
 
-        // Each account appears once per transfer, so its new entry_seq is the old one plus one.
-        var legs = transfer.Legs
-            .Select(l => new LegView(l.AccountId, l.Direction, l.Amount, locked[l.AccountId].EntrySeq + 1))
-            .ToList();
+        var legs = LedgerSql.NumberLegs(transfer.Legs, locked);
 
         // A duplicate reference aborts the statement; the savepoint keeps the surrounding
         // transaction usable so the 409 can still be stored against the idempotency key.
-        await transaction.SaveAsync("transfer_insert", cancellationToken);
+        await db.Transaction.SaveAsync("transfer_insert", cancellationToken);
         DateTimeOffset createdAt;
         try
         {
-            createdAt = await connection.ExecuteScalarAsync<DateTimeOffset>(new CommandDefinition(
-                """
-                INSERT INTO transactions (id, client_id, kind, currency, reference, description)
-                VALUES (@Id, @ClientId, 'transfer', @Currency, @Reference, @Description)
-                RETURNING created_at
-                """,
-                new { transfer.Id, transfer.ClientId, transfer.Currency, transfer.Reference, transfer.Description },
-                transaction,
-                cancellationToken: cancellationToken));
+            createdAt = await LedgerSql.InsertTransactionAsync(db, transfer.Id, transfer.ClientId, TransactionKind.Transfer,
+                transfer.Currency, transfer.Reference, transfer.Description, null, null, cancellationToken);
         }
         catch (PostgresException ex) when (ex is { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "ux_txn_transfer_reference" })
         {
-            await transaction.RollbackAsync("transfer_insert", cancellationToken);
+            await db.Transaction.RollbackAsync("transfer_insert", cancellationToken);
             return new LedgerError(ErrorKind.Conflict, "duplicate-reference", "Duplicate reference",
                 $"A transfer with reference '{transfer.Reference}' already exists.");
         }
 
-        await connection.ExecuteAsync(new CommandDefinition(
-            """
-            INSERT INTO postings (transaction_id, client_id, currency, account_id, account_seq, direction, amount)
-            SELECT @Id, @ClientId, @Currency, l.account_id, l.account_seq, l.direction::direction, l.amount
-            FROM unnest(@accountIds, @seqs, @directions, @amounts) AS l(account_id, account_seq, direction, amount);
-
-            UPDATE account_balances b
-            SET debits_posted  = v.debits_posted,
-                credits_posted = v.credits_posted,
-                entry_seq      = v.entry_seq,
-                version        = b.version + 1,
-                updated_at     = now()
-            FROM unnest(@accountIds, @debitsPosted, @creditsPosted, @seqs)
-                 AS v(account_id, debits_posted, credits_posted, entry_seq)
-            WHERE b.account_id = v.account_id;
-
-            INSERT INTO outbox_messages (id, aggregate_id, type, payload)
-            VALUES (@outboxId, @Id, 'transfer.posted', @payload::jsonb);
-            """,
-            new
-            {
-                transfer.Id,
-                transfer.ClientId,
-                transfer.Currency,
-                accountIds = legs.Select(l => l.AccountId).ToArray(),
-                seqs = legs.Select(l => l.AccountSeq).ToArray(),
-                directions = legs.Select(l => PgEnum.ToLabel(l.Direction)).ToArray(),
-                amounts = legs.Select(l => l.Amount).ToArray(),
-                debitsPosted = legs.Select(l => applied.Value[l.AccountId].DebitsPosted).ToArray(),
-                creditsPosted = legs.Select(l => applied.Value[l.AccountId].CreditsPosted).ToArray(),
-                outboxId = Guid.CreateVersion7(),
-                payload = JsonSerializer.Serialize(new
-                {
-                    transaction_id = transfer.Id,
-                    currency = transfer.Currency,
-                    reference = transfer.Reference,
-                    legs = legs.Select(l => new
-                    {
-                        account_id = l.AccountId,
-                        direction = PgEnum.ToLabel(l.Direction),
-                        amount = l.Amount,
-                        account_seq = l.AccountSeq,
-                    }),
-                }),
-            },
-            transaction,
-            cancellationToken: cancellationToken));
-
-        if (ownTransaction is not null)
+        await WritePostingsAsync(db, transfer.Id, transfer.ClientId, transfer.Currency, legs, applied.Value, cancellationToken);
+        await LedgerSql.EnqueueAsync(db, transfer.Id, "transfer.posted", new
         {
-            // The deferred balance triggers run at commit; a failure there is a bug, not a rejection.
-            await ownTransaction.CommitAsync(cancellationToken);
+            transaction_id = transfer.Id,
+            currency = transfer.Currency,
+            reference = transfer.Reference,
+            legs = LedgerSql.LegsPayload(legs),
+        }, cancellationToken);
+
+        await db.CommitAsync(cancellationToken);
+        return new TransferView(transfer.Id, TransactionKind.Transfer, "posted", transfer.Currency, transfer.Reference,
+            transfer.Description, null, null, createdAt, legs);
+    }
+
+    public async Task<Result<TransferView>> ReverseAsync(Guid clientId, Guid transactionId, Guid reversalId, string? description, CancellationToken cancellationToken)
+    {
+        await using var db = await session.EnlistAsync(cancellationToken);
+
+        // Transactions and postings are immutable, so they can be read without locks.
+        var original = await ReadAsync(db.Connection, db.Transaction, clientId, transactionId, cancellationToken);
+        if (original is null)
+        {
+            return TransferNotFound(transactionId);
         }
 
-        return new TransferView(transfer.Id, "posted", transfer.Currency, transfer.Reference, transfer.Description, createdAt, legs);
+        if (original.Kind == TransactionKind.Reversal)
+        {
+            return new LedgerError(ErrorKind.Rejected, "not-reversible", "Transaction cannot be reversed",
+                $"Transaction {transactionId} is itself a reversal. Post a new transfer instead.");
+        }
+
+        var reversedLegs = TransferRules.Reversed(original.Legs.Select(l => new TransferLeg(l.AccountId, l.Direction, l.Amount)));
+        var locked = await LedgerSql.LockAccountsAsync(db, clientId, reversedLegs.Select(l => l.AccountId), cancellationToken);
+
+        // Checked after the locks: a concurrent reversal of the same transaction holds them until it
+        // commits, so this statement sees it. Checking first also means "already reversed" wins over
+        // "insufficient funds", which a second reversal would otherwise hit.
+        var alreadyReversed = await db.Connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "SELECT EXISTS (SELECT 1 FROM transactions WHERE reverses_transaction_id = @transactionId)",
+            new { transactionId },
+            db.Transaction,
+            cancellationToken: cancellationToken));
+        if (alreadyReversed)
+        {
+            return AlreadyReversed(transactionId);
+        }
+
+        var applied = TransferRules.Apply(original.Currency, reversedLegs, locked.ToDictionary(kv => kv.Key, kv => kv.Value.ToLocked()), isReversal: true);
+        if (applied.Error is { } rejected)
+        {
+            return rejected;
+        }
+
+        var legs = LedgerSql.NumberLegs(reversedLegs, locked);
+
+        // ux_txn_single_reversal is the backstop if the check above is ever bypassed.
+        await db.Transaction.SaveAsync("reversal_insert", cancellationToken);
+        DateTimeOffset createdAt;
+        try
+        {
+            createdAt = await LedgerSql.InsertTransactionAsync(db, reversalId, clientId, TransactionKind.Reversal,
+                original.Currency, null, description, null, transactionId, cancellationToken);
+        }
+        catch (PostgresException ex) when (ex is { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "ux_txn_single_reversal" })
+        {
+            await db.Transaction.RollbackAsync("reversal_insert", cancellationToken);
+            return AlreadyReversed(transactionId);
+        }
+
+        await WritePostingsAsync(db, reversalId, clientId, original.Currency, legs, applied.Value, cancellationToken);
+        await LedgerSql.EnqueueAsync(db, reversalId, "transfer.reversed", new
+        {
+            transaction_id = reversalId,
+            reverses_transaction_id = transactionId,
+            currency = original.Currency,
+            legs = LedgerSql.LegsPayload(legs),
+        }, cancellationToken);
+
+        await db.CommitAsync(cancellationToken);
+        return new TransferView(reversalId, TransactionKind.Reversal, "posted", original.Currency, null, description,
+            null, transactionId, createdAt, legs);
     }
 
     public async Task<TransferView?> GetAsync(Guid clientId, Guid transferId, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        return await ReadAsync(connection, null, clientId, transferId, cancellationToken);
+    }
+
+    private static LedgerError AlreadyReversed(Guid id) =>
+        new(ErrorKind.Conflict, "already-reversed", "Already reversed", $"Transaction {id} has already been reversed.");
+
+    internal static LedgerError TransferNotFound(Guid id) =>
+        new(ErrorKind.NotFound, "transfer-not-found", "Transfer not found", $"Transfer {id} does not exist.");
+
+    private static async Task WritePostingsAsync(
+        Enlistment db, Guid transactionId, Guid clientId, string currency, List<LegView> legs,
+        IReadOnlyDictionary<Guid, Balance> balances, CancellationToken cancellationToken)
+    {
+        await LedgerSql.InsertPostingsAsync(db, transactionId, clientId, currency, legs, cancellationToken);
+        await LedgerSql.UpdateBalancesAsync(db, legs.Select(l => (l.AccountId, balances[l.AccountId], l.AccountSeq)).ToList(), cancellationToken);
+    }
+
+    private static async Task<TransferView?> ReadAsync(
+        NpgsqlConnection connection, NpgsqlTransaction? transaction, Guid clientId, Guid transactionId, CancellationToken cancellationToken)
+    {
         await using var results = await connection.QueryMultipleAsync(new CommandDefinition(
             """
-            SELECT id, currency, reference, description, created_at
+            SELECT id, kind::text AS kind, currency, reference, description, hold_id, reverses_transaction_id, created_at
             FROM transactions
-            WHERE id = @transferId AND client_id = @clientId AND kind = 'transfer';
+            WHERE id = @transactionId AND client_id = @clientId;
 
             SELECT account_id, direction::text AS direction, amount, account_seq
             FROM postings
-            WHERE transaction_id = @transferId AND client_id = @clientId
+            WHERE transaction_id = @transactionId AND client_id = @clientId
             ORDER BY id;
             """,
-            new { transferId, clientId },
+            new { transactionId, clientId },
+            transaction,
             cancellationToken: cancellationToken));
 
         var header = await results.ReadSingleOrDefaultAsync<TransactionRow>();
@@ -157,15 +168,19 @@ internal sealed class TransferStore(NpgsqlDataSource dataSource, LedgerSession s
         var legs = (await results.ReadAsync<PostingRow>())
             .Select(p => new LegView(p.AccountId, PgEnum.ToDirection(p.Direction), p.Amount, p.AccountSeq))
             .ToList();
-        return new TransferView(header.Id, "posted", header.Currency, header.Reference, header.Description, header.CreatedAt, legs);
+        return new TransferView(header.Id, PgEnum.ToTransactionKind(header.Kind), "posted", header.Currency, header.Reference,
+            header.Description, header.HoldId, header.ReversesTransactionId, header.CreatedAt, legs);
     }
 
     private sealed class TransactionRow
     {
         public Guid Id { get; init; }
+        public string Kind { get; init; } = "";
         public string Currency { get; init; } = "";
         public string? Reference { get; init; }
         public string? Description { get; init; }
+        public Guid? HoldId { get; init; }
+        public Guid? ReversesTransactionId { get; init; }
         public DateTimeOffset CreatedAt { get; init; }
     }
 
