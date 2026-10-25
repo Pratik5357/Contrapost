@@ -3,11 +3,15 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Contrapost.Application.Clients;
+using Contrapost.Consumers;
 using Contrapost.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 using Testcontainers.PostgreSql;
+using Testcontainers.RabbitMq;
 
 namespace Contrapost.IntegrationTests;
 
@@ -21,13 +25,16 @@ public sealed class ApiFixture : IAsyncLifetime
     };
 
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16").Build();
+    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder("rabbitmq:4.1-management").Build();
     private WebApplicationFactory<Program>? _factory;
 
     public string ConnectionString => _postgres.GetConnectionString();
 
+    public string RabbitUri => _rabbit.GetConnectionString();
+
     public async Task InitializeAsync()
     {
-        await _postgres.StartAsync();
+        await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync());
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
@@ -46,7 +53,37 @@ public sealed class ApiFixture : IAsyncLifetime
         }
 
         await _postgres.DisposeAsync();
+        await _rabbit.DisposeAsync();
     }
+
+    /// <summary>The services the Worker and Consumers processes run with (relay, inbox, handlers), unstarted.</summary>
+    public ServiceProvider MessagingServices(string? rabbitUri = null)
+    {
+        var configuration = MessagingConfiguration(rabbitUri);
+        var services = new ServiceCollection().AddLogging().AddSingleton(configuration);
+        services.AddConsumers(configuration);
+        return services.BuildServiceProvider();
+    }
+
+    /// <summary>A running Consumers process: both queue consumers start and consume until disposed.</summary>
+    public async Task<IHost> StartConsumersAsync()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddConfiguration(MessagingConfiguration(null));
+        builder.Services.AddConsumers(builder.Configuration);
+        var host = builder.Build();
+        await host.StartAsync();
+        return host;
+    }
+
+    private IConfiguration MessagingConfiguration(string? rabbitUri) => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:Postgres"] = ConnectionString,
+            ["ConnectionStrings:RabbitMq"] = rabbitUri ?? RabbitUri,
+            ["Consumers:LowBalanceThreshold"] = "1000",
+        })
+        .Build();
 
     /// <summary>Creates a fresh API client with its own key, so tests don't share state.</summary>
     public async Task<TestClient> NewTestClientAsync(params string[] scopes)
