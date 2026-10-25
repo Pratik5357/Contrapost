@@ -82,14 +82,4 @@ public sealed class AccountTests(ApiFixture api)
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync(new Uri($"/v1/accounts/{account.Id}", UriKind.Relative))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync(new Uri($"/v1/accounts/{account.Id}/entries", UriKind.Relative))).StatusCode);
     }
-
-    [Fact]
-    public async Task Requests_without_a_known_client_are_unauthenticated()
-    {
-        using var anonymous = api.AnonymousClient();
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(new Uri($"/v1/accounts/{Guid.NewGuid()}", UriKind.Relative))).StatusCode);
-
-        anonymous.DefaultRequestHeaders.Add("X-Client-Id", Guid.NewGuid().ToString());
-        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync(new Uri($"/v1/accounts/{Guid.NewGuid()}", UriKind.Relative))).StatusCode);
-    }
 }

@@ -87,7 +87,8 @@ public sealed class TransferTests(ApiFixture api)
     {
         using var http = await api.NewClientAsync();
 
-        var response = await http.PostAsJsonAsync("/v1/transfers", new { currency = "INR", legs = new object[] { new { amount = 5 }, new { amount = 5 } } });
+        var response = await http.PostWithKeyAsync("/v1/transfers", "k-missing-fields",
+            new { currency = "INR", legs = new object[] { new { amount = 5 }, new { amount = 5 } } });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.True((await response.ProblemAsync()).GetProperty("errors").TryGetProperty("legs[0].account_id", out _));

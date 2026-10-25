@@ -19,8 +19,8 @@ public sealed class ConcurrencyTests(ApiFixture api)
     [Fact]
     public async Task Concurrent_transfers_never_deadlock_overdraw_or_lose_money()
     {
-        using var http = await api.NewClientAsync();
-        var clientId = Guid.Parse(http.DefaultRequestHeaders.GetValues("X-Client-Id").Single());
+        using var client = await api.NewTestClientAsync();
+        var (http, clientId) = (client.Http, client.ClientId);
         var wallets = new List<Account>();
         for (var i = 0; i < Wallets; i++)
         {

@@ -4,6 +4,7 @@ using System.Text;
 using Contrapost.Api.Auth;
 using Contrapost.Api.Http;
 using Contrapost.Application.Accounts;
+using Contrapost.Application.Clients;
 using Contrapost.Domain;
 using Contrapost.Domain.Ledger;
 
@@ -18,10 +19,10 @@ internal static class AccountEndpoints
     public static RouteGroupBuilder MapAccountEndpoints(this RouteGroupBuilder v1)
     {
         var accounts = v1.MapGroup("/accounts");
-        accounts.MapPost("/", CreateAsync);
-        accounts.MapGet("/{id:guid}", GetAsync);
-        accounts.MapGet("/{id:guid}/balance", GetBalanceAsync);
-        accounts.MapGet("/{id:guid}/entries", ListEntriesAsync);
+        accounts.MapPost("/", CreateAsync).RequireAuthorization(Scopes.AccountsWrite);
+        accounts.MapGet("/{id:guid}", GetAsync).RequireAuthorization(Scopes.AccountsRead);
+        accounts.MapGet("/{id:guid}/balance", GetBalanceAsync).RequireAuthorization(Scopes.AccountsRead);
+        accounts.MapGet("/{id:guid}/entries", ListEntriesAsync).RequireAuthorization(Scopes.AccountsRead);
         return v1;
     }
 

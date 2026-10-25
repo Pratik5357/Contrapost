@@ -1,5 +1,6 @@
 using Contrapost.Application.Accounts;
 using Contrapost.Application.Clients;
+using Contrapost.Application.Idempotency;
 using Contrapost.Application.Transfers;
 using Contrapost.Infrastructure.Ledger;
 using Contrapost.Infrastructure.Persistence;
@@ -28,7 +29,12 @@ public static class DependencyInjection
 
         services.AddScoped<IAccountStore, AccountStore>();
         services.AddScoped<ITransferStore, TransferStore>();
-        services.AddScoped<IClientDirectory, ClientDirectory>();
+        services.AddScoped<IApiClientStore, ApiClientStore>();
+
+        services.AddSingleton(new IdempotencySettings(
+            TimeSpan.FromMilliseconds(configuration.GetValue("Idempotency:LockTimeoutMs", 5000))));
+        services.AddScoped<LedgerSession>();
+        services.AddScoped<IIdempotencyScope>(provider => provider.GetRequiredService<LedgerSession>());
 
         services.AddHealthChecks()
             .AddCheck<SchemaHealthCheck>("postgres", tags: [ReadyTag]);

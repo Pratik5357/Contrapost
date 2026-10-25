@@ -9,13 +9,17 @@ using Npgsql;
 namespace Contrapost.Infrastructure.Ledger;
 
 /// <summary>Strategy A from design doc §8.1: pessimistic row locks taken in account-id order.</summary>
-internal sealed class TransferStore(NpgsqlDataSource dataSource) : ITransferStore
+internal sealed class TransferStore(NpgsqlDataSource dataSource, LedgerSession session) : ITransferStore
 {
     public async Task<Result<TransferView>> PostAsync(NewTransfer transfer, CancellationToken cancellationToken)
     {
-        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        // Under an idempotency key the request's transaction is already open and is committed
+        // by the idempotency scope together with the stored response; otherwise use our own.
+        await using var own = session.Transaction is null ? await dataSource.OpenConnectionAsync(cancellationToken) : null;
         // READ COMMITTED is enough: every value a decision depends on is read under FOR UPDATE.
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        await using var ownTransaction = own is null ? null : await own.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        var transaction = session.Transaction ?? ownTransaction!;
+        var connection = transaction.Connection!;
 
         // Postgres locks rows in the ORDER BY order (LockRows sits above Sort), so two
         // transfers over the same accounts always lock them in the same order and can't deadlock.
@@ -47,6 +51,9 @@ internal sealed class TransferStore(NpgsqlDataSource dataSource) : ITransferStor
             .Select(l => new LegView(l.AccountId, l.Direction, l.Amount, locked[l.AccountId].EntrySeq + 1))
             .ToList();
 
+        // A duplicate reference aborts the statement; the savepoint keeps the surrounding
+        // transaction usable so the 409 can still be stored against the idempotency key.
+        await transaction.SaveAsync("transfer_insert", cancellationToken);
         DateTimeOffset createdAt;
         try
         {
@@ -62,6 +69,7 @@ internal sealed class TransferStore(NpgsqlDataSource dataSource) : ITransferStor
         }
         catch (PostgresException ex) when (ex is { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "ux_txn_transfer_reference" })
         {
+            await transaction.RollbackAsync("transfer_insert", cancellationToken);
             return new LedgerError(ErrorKind.Conflict, "duplicate-reference", "Duplicate reference",
                 $"A transfer with reference '{transfer.Reference}' already exists.");
         }
@@ -114,8 +122,11 @@ internal sealed class TransferStore(NpgsqlDataSource dataSource) : ITransferStor
             transaction,
             cancellationToken: cancellationToken));
 
-        // The deferred balance triggers run here; a failure at this point is a bug, not a rejection.
-        await transaction.CommitAsync(cancellationToken);
+        if (ownTransaction is not null)
+        {
+            // The deferred balance triggers run at commit; a failure there is a bug, not a rejection.
+            await ownTransaction.CommitAsync(cancellationToken);
+        }
 
         return new TransferView(transfer.Id, "posted", transfer.Currency, transfer.Reference, transfer.Description, createdAt, legs);
     }
