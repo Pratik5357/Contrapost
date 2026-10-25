@@ -1,0 +1,33 @@
+# The alerts from design doc §12. Prometheus evaluates them (see /alerts); routing them to people
+# needs an Alertmanager, which this local stack doesn't run.
+groups:
+  - name: contrapost
+    rules:
+      - alert: ReconciliationDrift
+        expr: max(ledger_reconciliation_findings) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: The last reconciliation run found {{ $value }} findings; the ledger disagrees with itself.
+
+      - alert: OutboxLagHigh
+        expr: max(ledger_outbox_lag_seconds) > 60
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: The oldest unpublished event is {{ $value | humanizeDuration }} old; consumers are falling behind.
+
+      - alert: TransferLatencyHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(ledger_transfer_duration_seconds_bucket[5m]))) > 0.5
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: Transfer p99 latency is {{ $value | humanizeDuration }}, above the 500 ms target.
+
+      - alert: ServerErrorRateHigh
+        expr: |
+          sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[5m]))
+            / sum(rate(http_server_request_duration_seconds_count[5m])) > 0.01
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: '{{ $value | humanizePercentage }} of API requests are failing with 5xx.'
