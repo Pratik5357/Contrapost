@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Seeds the local docker compose database with demo data (db/seed/dev.sql).
+# Creates a demo client in the local docker compose stack and prints its API key.
+# Each run creates a new client; keys can't be recovered later, only their hashes are stored.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-docker compose -f "$root/deploy/docker-compose.yml" exec -T postgres \
-  psql -U contrapost -d contrapost -v ON_ERROR_STOP=1 -q < "$root/db/seed/dev.sql"
-echo "seeded: X-Client-Id 11111111-1111-1111-1111-111111111111"
+docker compose -f "$root/deploy/docker-compose.yml" run --rm migrate create-client "${1:-demo}"

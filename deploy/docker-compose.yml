@@ -3,6 +3,7 @@
 name: contrapost
 
 x-app-env: &app-env
+  ApiKeys__Environment: dev
   ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=contrapost;Username=contrapost;Password=contrapost;Gss Encryption Mode=Disable
 
 services:
@@ -53,10 +54,7 @@ services:
 
   api:
     image: contrapost-api
-    environment:
-      <<: *app-env
-      # Until API keys exist (M2), the local stack identifies clients by X-Client-Id.
-      Auth__DevClientHeader: "true"
+    environment: *app-env
     ports: ["8080:8080"]
     depends_on:
       migrate: { condition: service_completed_successfully }
