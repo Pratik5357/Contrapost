@@ -6,18 +6,18 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Milestone M5 (verification; rate limiting follows separately):
+Milestone M5:
 - Accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
 - API-key authentication with per-endpoint scopes.
 - Idempotency keys on every money-moving POST. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
 - Holds: authorize, capture in full or in several partial captures, void, or let the Worker expire them.
 - Reversals of transfers and captures: at most once, and subject to overdraft rules.
+- Per-client rate limiting: a Redis sliding window returns `429` with `Retry-After`, and lets requests through if Redis is down ([ADR-006](docs/adr/ADR-006-rate-limiter-fails-open.md)).
 - Events: a transactional outbox, relayed to RabbitMQ with publisher confirms, consumed by a statement projector and a low-balance notifier that deduplicate through an inbox. Quorum queues with dead-letter queues hold poison messages.
-
 - Reconciliation of invariants I1–I8, nightly in the Worker or on demand, with the results readable at `/v1/admin/reconciliation/*`.
 - Verification: a headline concurrency test (random mixed operations, then a reconciliation that must be clean) and FsCheck property tests of the domain rules.
 
-Not yet: Redis rate limiting (rest of M5), observability and benchmarks (M6), the admin dashboard (M7).
+Not yet: observability and benchmarks (M6), the admin dashboard (M7).
 
 ## Getting started
 

@@ -619,7 +619,11 @@ Reconciliation never takes locks (`REPEATABLE READ, READ ONLY`). The per-account
 - **API keys:** the format is `cp_<env>_<prefix>.<secret>`. Only the SHA-256 hash of the secret is stored; lookup uses the prefix and comparison uses constant time.
 - **Scopes** per client (`accounts:read`, `accounts:write`, `transfers:write`, `holds:write`, `admin:read`). `admin:read` is the only scope that crosses tenants; it is granted only to the admin dashboard's key, and every admin request is logged with the operator's session id passed in `X-Operator-Session`.
 - **Tenant isolation:** every query is filtered by `client_id`. Integration tests check that client A can't read or move client B's accounts.
-- **Rate limiting:** a Redis sliding window per client returns `429` with `Retry-After`. If Redis is unavailable, the limiter **fails open**, logs a warning and records a metric. This choice is documented in the case study.
+- **Rate limiting:** each client's `rate_limit_rpm` is enforced with a sliding-window log in a Redis sorted set.
+  - **Atomic and shared:** one Lua script trims, counts and adds, reading the clock from Redis, so all API instances share one window.
+  - **Where it runs:** on every `/v1` request, after authentication and before idempotency, so a limited request never claims a key.
+  - **Responses:** a limited request gets `429 rate-limited` with `Retry-After`, and every response carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
+  - **Fails open:** if Redis is unavailable, requests proceed and a warning is logged ([ADR-006](docs/adr/ADR-006-rate-limiter-fails-open.md)). With fail-fast connection settings an outage costs about 3 ms per request.
 - **Request limits:** maximum body size, maximum legs per transfer, input validation with FluentValidation.
 - **Least-privilege database roles:** the API role cannot `UPDATE` or `DELETE` postings or transactions; the migration role is separate.
 - **Secrets** are supplied through environment variables or the host's secret store, never committed.
@@ -761,7 +765,7 @@ contrapost/
 3. ADR-003 Pessimistic ordered locking as the default strategy
 4. ADR-004 Transactional outbox instead of publishing directly from the request
 5. ADR-005 RabbitMQ over Kafka for v1
-6. ADR-006 Rate limiter fails open when Redis is unavailable
+6. ADR-006 Rate limiter fails open when Redis is unavailable *(written)*
 7. ADR-007 Holds are the record of pending money; postings record only posted money
 8. ADR-008 Database guards as a second line of defence (composite FKs, overdraft `CHECK`s, deferred balance triggers)
 9. ADR-009 Minimal APIs instead of controllers *(written)*
