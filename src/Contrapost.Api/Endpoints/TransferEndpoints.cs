@@ -1,5 +1,6 @@
 using Contrapost.Api.Auth;
 using Contrapost.Api.Http;
+using Contrapost.Application.Clients;
 using Contrapost.Application.Transfers;
 using Contrapost.Domain;
 using Contrapost.Domain.Ledger;
@@ -15,8 +16,10 @@ internal static class TransferEndpoints
     public static RouteGroupBuilder MapTransferEndpoints(this RouteGroupBuilder v1)
     {
         var transfers = v1.MapGroup("/transfers");
-        transfers.MapPost("/", PostAsync);
-        transfers.MapGet("/{id:guid}", GetAsync);
+        transfers.MapPost("/", PostAsync)
+            .RequireAuthorization(Scopes.TransfersWrite)
+            .AddEndpointFilter<IdempotencyFilter<PostTransferRequest>>();
+        transfers.MapGet("/{id:guid}", GetAsync).RequireAuthorization(Scopes.AccountsRead);
         return v1;
     }
 

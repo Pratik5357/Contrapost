@@ -1,8 +1,11 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Contrapost.Application.Clients;
 using Contrapost.Infrastructure;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using Testcontainers.PostgreSql;
 
@@ -28,7 +31,9 @@ public sealed class ApiFixture : IAsyncLifetime
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
-            builder.UseSetting("Auth:DevClientHeader", "true");
+            builder.UseSetting("ApiKeys:Environment", "test");
+            // Short, so the in-progress test doesn't wait the production 5 s.
+            builder.UseSetting("Idempotency:LockTimeoutMs", "1000");
         });
         await _factory.Services.MigrateDatabaseAsync();
     }
@@ -43,25 +48,23 @@ public sealed class ApiFixture : IAsyncLifetime
         await _postgres.DisposeAsync();
     }
 
-    /// <summary>Creates a fresh API client row and an HttpClient authenticated as it, so tests don't share state.</summary>
-    public async Task<HttpClient> NewClientAsync()
+    /// <summary>Creates a fresh API client with its own key, so tests don't share state.</summary>
+    public async Task<TestClient> NewTestClientAsync(params string[] scopes)
     {
         var clientId = Guid.CreateVersion7();
-        await using (var connection = new NpgsqlConnection(ConnectionString))
+        var key = ApiKeys.Generate("test");
+        await using (var scope = _factory!.Services.CreateAsyncScope())
         {
-            await connection.OpenAsync();
-            await using var command = new NpgsqlCommand(
-                "INSERT INTO api_clients (id, name, key_prefix, key_hash, scopes) VALUES (@id, 'test', @prefix, '\\x00', '{}')",
-                connection);
-            command.Parameters.AddWithValue("id", clientId);
-            command.Parameters.AddWithValue("prefix", $"cp_test_{clientId:N}");
-            await command.ExecuteNonQueryAsync();
+            await scope.ServiceProvider.GetRequiredService<IApiClientStore>()
+                .CreateAsync(clientId, "test", key, scopes.Length > 0 ? scopes : Scopes.All, CancellationToken.None);
         }
 
-        var http = _factory!.CreateClient();
-        http.DefaultRequestHeaders.Add("X-Client-Id", clientId.ToString());
-        return http;
+        var http = _factory.CreateClient();
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key.Key);
+        return new TestClient(http, clientId, key);
     }
+
+    public async Task<HttpClient> NewClientAsync(params string[] scopes) => (await NewTestClientAsync(scopes)).Http;
 
     public HttpClient AnonymousClient() => _factory!.CreateClient();
 
@@ -77,6 +80,11 @@ public sealed class ApiFixture : IAsyncLifetime
 
         return (T)(await command.ExecuteScalarAsync())!;
     }
+}
+
+public sealed record TestClient(HttpClient Http, Guid ClientId, ApiKeys.Generated Key) : IDisposable
+{
+    public void Dispose() => Http.Dispose();
 }
 
 [CollectionDefinition("api")]
@@ -111,12 +119,27 @@ public static class LedgerApi
 
     public static Task<HttpResponseMessage> PostTransferAsync(this HttpClient http, string currency, string? reference,
         params (Guid Account, string Direction, long Amount)[] legs) =>
-        http.PostAsJsonAsync("/v1/transfers", new
+        http.PostTransferWithKeyAsync(Guid.NewGuid().ToString(), currency, reference, legs);
+
+    public static Task<HttpResponseMessage> PostTransferWithKeyAsync(this HttpClient http, string? idempotencyKey, string currency,
+        string? reference, params (Guid Account, string Direction, long Amount)[] legs) =>
+        http.PostWithKeyAsync("/v1/transfers", idempotencyKey, new
         {
             currency,
             reference,
             legs = legs.Select(l => new { account_id = l.Account, direction = l.Direction, amount = l.Amount }),
         });
+
+    public static async Task<HttpResponseMessage> PostWithKeyAsync(this HttpClient http, string path, string? idempotencyKey, object body)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = JsonContent.Create(body) };
+        if (idempotencyKey is not null)
+        {
+            request.Headers.Add("Idempotency-Key", idempotencyKey);
+        }
+
+        return await http.SendAsync(request);
+    }
 
     /// <summary>Funds a wallet from a system account that is allowed to go negative.</summary>
     public static async Task<Account> FundedWalletAsync(this HttpClient http, string code, long amount, string currency = "INR")
