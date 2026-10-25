@@ -105,6 +105,13 @@ public sealed class ApiFixture : IAsyncLifetime
 
     public HttpClient AnonymousClient() => _factory!.CreateClient();
 
+    public async Task<Contrapost.Application.Reconciliation.ReconciliationRunView?> ReconcileAsync()
+    {
+        await using var scope = _factory!.Services.CreateAsyncScope();
+        return await scope.ServiceProvider.GetRequiredService<Contrapost.Application.Reconciliation.IReconciliationStore>()
+            .RunAsync(CancellationToken.None);
+    }
+
     /// <summary>Runs one expiry batch the way the Worker's job does.</summary>
     public async Task<int> ExpireDueHoldsAsync()
     {
