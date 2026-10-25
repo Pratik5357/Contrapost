@@ -1,0 +1,13 @@
+strategy,pool,posted,per_second,p50_ms,p99_ms,avg_attempts,gave_up,errors,reconciliation
+A pessimistic,2,3883,387.6,20.29,30.38,1.000,0,0,clean (0 findings)
+B optimistic,2,2861,284.7,3.59,140.35,1.900,243,0,clean (0 findings)
+C serializable,2,284,28.3,3.70,5066.01,1.884,26,0,clean (0 findings)
+A pessimistic,10,6825,681.4,10.14,34.12,1.000,0,0,clean (0 findings)
+B optimistic,10,4397,438.4,6.44,116.85,2.150,34,0,clean (0 findings)
+C serializable,10,3204,308.5,7.14,149.96,2.182,22,0,clean (0 findings)
+A pessimistic,100,8998,899.1,8.32,18.33,1.000,0,0,clean (0 findings)
+B optimistic,100,7586,757.7,8.80,34.80,1.225,0,0,clean (0 findings)
+C serializable,100,7360,735.6,8.69,40.52,1.248,0,0,clean (0 findings)
+A pessimistic,1000,8481,847.5,9.18,16.74,1.000,0,0,clean (0 findings)
+B optimistic,1000,8217,821.0,9.38,19.86,1.023,0,0,clean (0 findings)
+C serializable,1000,8645,864.0,8.78,22.19,1.039,0,0,clean (0 findings)
