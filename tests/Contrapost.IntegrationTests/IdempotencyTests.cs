@@ -149,6 +149,31 @@ public sealed class IdempotencyTests(ApiFixture api)
     }
 
     [Fact]
+    public async Task The_key_lock_timeout_does_not_limit_waits_for_busy_accounts()
+    {
+        using var http = await api.NewClientAsync();
+        var alice = await http.FundedWalletAsync("wallet:alice", 1_000);
+        var bob = await http.CreateAccountAsync("wallet:bob");
+
+        // Another transaction holds alice's balance row for longer than the 1 s key lock timeout.
+        await using var connection = new NpgsqlConnection(api.ConnectionString);
+        await connection.OpenAsync();
+        await using var holder = await connection.BeginTransactionAsync();
+        await using (var lockRow = new NpgsqlCommand("SELECT 1 FROM account_balances WHERE account_id = @a FOR UPDATE", connection, holder))
+        {
+            lockRow.Parameters.AddWithValue("a", alice.Id);
+            await lockRow.ExecuteScalarAsync();
+        }
+
+        var transfer = http.PostTransferAsync("INR", (alice.Id, "debit", 100), (bob.Id, "credit", 100));
+        await Task.Delay(TimeSpan.FromSeconds(1.5));
+        Assert.False(transfer.IsCompleted);
+
+        await holder.RollbackAsync();
+        Assert.Equal(HttpStatusCode.Created, (await transfer).StatusCode);
+    }
+
+    [Fact]
     public async Task Duplicate_of_a_request_still_running_gets_409_after_the_lock_timeout()
     {
         using var client = await api.NewTestClientAsync();

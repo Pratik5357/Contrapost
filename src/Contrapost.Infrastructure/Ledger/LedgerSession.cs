@@ -57,6 +57,10 @@ internal sealed class LedgerSession(NpgsqlDataSource dataSource, IdempotencySett
 
         if (claimed == 1)
         {
+            // SET LOCAL lasts for the whole transaction, but the timeout is only for the key: the
+            // ledger's balance-row waits are deadlock-free (ordered locking) and must not fail
+            // because a hot account is busy.
+            await _connection.ExecuteAsync("SET LOCAL lock_timeout TO DEFAULT", transaction: Transaction);
             _key = key;
             return new ClaimResult.Claimed();
         }
