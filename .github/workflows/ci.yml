@@ -45,3 +45,23 @@ jobs:
         run: docker build -f src/Contrapost.Worker/Dockerfile -t contrapost-worker:${{ github.sha }} .
       - name: Build consumers image
         run: docker build -f src/Contrapost.Consumers/Dockerfile -t contrapost-consumers:${{ github.sha }} .
+
+  # Design doc §14: a 60-second smoke load test that fails the build if p99 or the error rate
+  # crosses the thresholds in tests/load/ledger.js.
+  smoke-load:
+    name: Smoke load test (60 s)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grafana/setup-k6-action@v1
+      - name: Start the ledger services
+        run: docker compose -f deploy/docker-compose.yml up -d --build --wait api worker consumers
+      - name: Run the mixed scenario
+        run: DURATION=60s VUS=5 tests/load/run.sh mixed
+      - name: Keep the k6 summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary
+          path: tests/load/results/

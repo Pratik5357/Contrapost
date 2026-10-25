@@ -686,7 +686,7 @@ Routing them to people needs an Alertmanager, which isn't part of the local stac
 | Property-based | FsCheck (`Contrapost.PropertyTests`) | Random sequences of transfers, holds, captures, voids, expiries and reversals, run through the domain rules, keep I2–I5 and hold-status consistency after every step; transfer validation accepts exactly the well-formed transfers. FsCheck shrinks a failure to a minimal script |
 | Integration | xUnit + Testcontainers (Postgres, RabbitMQ, Redis) | Real SQL, locking, idempotency, outbox, tenant isolation |
 | Concurrency | `HeadlineConcurrencyTests` in the integration tests | N parallel workers doing random transfers, holds, captures, voids, reversals and replays, with the expiry job running; reconciliation must be clean at the end. CI runs 15 s; the full run is configured with `CONTRAPOST_SOAK_*` variables |
-| Load | k6 | Throughput and latency under several scenarios |
+| Load | k6 (`tests/load/`) | Throughput and latency under the four scenarios below; light by default (5 users, 30 s), heavier via `VUS`/`DURATION`. CI runs `mixed` for 60 s and fails on the thresholds |
 | Chaos | Docker + scripted kills (or Toxiproxy) | Kill or slow down components mid-run; verify invariants and event delivery |
 
 ### 13.1 Concurrency test (the headline test)
@@ -822,14 +822,14 @@ Fill these in from real runs. Leave out any number you didn't measure.
 
 | Result | Value |
 |---|---|
-| Throughput, `uniform` scenario (transfers/s) | _TBD_ |
-| p50 / p95 / p99 latency, `uniform` | _TBD_ |
-| Throughput, `hot_account`: strategy A vs B vs C | _TBD_ |
+| Throughput, `uniform` scenario (transfers/s) | 736 requests/s at 5 virtual users on a laptop ([details](docs/results/load-m6.md)) |
+| p50 / p95 / p99 latency, `uniform` | 5.2 / 13.2 / 27.6 ms (client side, k6) |
+| Throughput, `hot_account`: strategy A vs B vs C | A: 475 requests/s, p99 50 ms at 5 users; B and C not built yet |
 | Throughput, `hot_account` with sharding (stretch) | _TBD_ |
 | Operations in the concurrency run / reconciliation findings | 256,357 requests from 64 workers in 5 min / 0 findings ([details](docs/results/concurrency-m5.md)) |
 | Chaos runs passed | 2 / 5 so far: C2 and C3 ([results](docs/results/chaos-m4.md)) |
 | Max outbox lag during the broker outage, and drain time | 124 s (18.8k rows) during a 120 s outage; drained 100 s after the broker returned, on a shared laptop ([details](docs/results/chaos-m4.md)) |
-| Hardware used for benchmarks | _TBD_ (always state it) |
+| Hardware used for benchmarks | Apple M3, 8 GB RAM; Docker Desktop with 8 CPUs and 3.8 GB, everything on one machine |
 
 ---
 
