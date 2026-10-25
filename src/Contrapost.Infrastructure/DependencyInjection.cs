@@ -2,10 +2,12 @@ using Contrapost.Application.Accounts;
 using Contrapost.Application.Clients;
 using Contrapost.Application.Holds;
 using Contrapost.Application.Idempotency;
+using Contrapost.Application.Reconciliation;
 using Contrapost.Application.Transfers;
 using Contrapost.Infrastructure.Ledger;
 using Contrapost.Infrastructure.Messaging;
 using Contrapost.Infrastructure.Persistence;
+using Contrapost.Infrastructure.Reconciliation;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +38,13 @@ public static class DependencyInjection
 
         services.AddSingleton(new IdempotencySettings(
             TimeSpan.FromMilliseconds(configuration.GetValue("Idempotency:LockTimeoutMs", 5000))));
+        services.AddSingleton(new ReconciliationSettings(
+            ChunkSize: configuration.GetValue("Reconciliation:ChunkSize", 1000),
+            MaxFindingsPerCheck: configuration.GetValue("Reconciliation:MaxFindingsPerCheck", 1000),
+            // I7 only looks at events still inside the outbox retention window (7 days), with a day's margin.
+            EventWindow: TimeSpan.FromDays(configuration.GetValue("Reconciliation:EventWindowDays", 6))));
+        services.AddScoped<IReconciliationStore, ReconciliationStore>();
+
         services.AddScoped<LedgerSession>();
         services.AddScoped<IIdempotencyScope>(provider => provider.GetRequiredService<LedgerSession>());
 

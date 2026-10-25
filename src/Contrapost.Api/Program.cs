@@ -4,6 +4,7 @@ using Contrapost.Api.Auth;
 using Contrapost.Api.Endpoints;
 using Contrapost.Application;
 using Contrapost.Application.Clients;
+using Contrapost.Application.Reconciliation;
 using Contrapost.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
@@ -25,6 +26,26 @@ var app = builder.Build();
 if (args is ["migrate", ..])
 {
     await app.Services.MigrateDatabaseAsync();
+    return;
+}
+
+// `Contrapost.Api reconcile` runs reconciliation once. Exit code 0: clean, 2: drift found, 1: not run.
+if (args is ["reconcile", ..])
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var run = await scope.ServiceProvider.GetRequiredService<IReconciliationStore>().RunAsync(CancellationToken.None);
+    if (run is null)
+    {
+        await Console.Error.WriteLineAsync("Another reconciliation run is in progress.");
+        Environment.ExitCode = 1;
+        return;
+    }
+
+    Console.WriteLine($"run: {run.Id}");
+    Console.WriteLine($"status: {run.Status}");
+    Console.WriteLine($"accounts_checked: {run.AccountsChecked}");
+    Console.WriteLine($"findings: {run.FindingsCount}");
+    Environment.ExitCode = run.Status == "clean" ? 0 : 2;
     return;
 }
 
@@ -68,6 +89,7 @@ app.MapGroup("/v1")
     .RequireAuthorization()
     .MapAccountEndpoints()
     .MapTransferEndpoints()
-    .MapHoldEndpoints();
+    .MapHoldEndpoints()
+    .MapAdminEndpoints();
 
 await app.RunAsync();
