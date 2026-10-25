@@ -21,7 +21,9 @@ Milestone M6 (in progress):
 
 - Load tests: k6 scenarios for uniform, hot-account, retry-storm and mixed traffic, with a 60-second smoke run in CI ([results](docs/results/load-m6.md)).
 
-Not yet: the locking-strategy benchmark and the remaining chaos runs (rest of M6), the admin dashboard (M7).
+- Locking-strategy benchmark: pessimistic (production) vs optimistic vs serializable against contention, on a dedicated CI runner ([results](docs/results/locking-benchmark.md), [ADR-003](docs/adr/ADR-003-pessimistic-ordered-locking.md)).
+
+Not yet: the remaining chaos runs and the cloud deployment (rest of M6), the admin dashboard (M7).
 
 ## Getting started
 

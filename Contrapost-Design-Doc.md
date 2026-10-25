@@ -497,6 +497,13 @@ FOR UPDATE;
 
 Publish a chart of throughput and p99 latency against contention level for each strategy. Showing that you measured the trade-off is worth more than claiming one approach is best.
 
+**Measured** ([results and chart](docs/results/locking-benchmark.md), on a dedicated CI runner):
+- **Maximum contention (a pool of 2):** A does 388 transfers/s with a p99 of 30 ms and never gives up. B abandons 243 transfers (p99 140 ms). C collapses to 28/s (p99 5 s).
+- **Low contention:** all three are within 5%.
+- **Correctness:** every cell reconciled clean.
+
+A stays in production ([ADR-003](docs/adr/ADR-003-pessimistic-ordered-locking.md)).
+
 ### 8.2 Hot accounts
 
 A system account such as `settlement:INR` takes part in almost every transfer, so its row lock becomes the bottleneck.
@@ -785,7 +792,7 @@ contrapost/
 
 1. ADR-001 PostgreSQL over SQL Server for this project (`SKIP LOCKED`, deferrable constraints, free hosting)
 2. ADR-002 Integer minor units for money
-3. ADR-003 Pessimistic ordered locking as the default strategy
+3. ADR-003 Pessimistic ordered locking as the default strategy *(written)*
 4. ADR-004 Transactional outbox instead of publishing directly from the request
 5. ADR-005 RabbitMQ over Kafka for v1
 6. ADR-006 Rate limiter fails open when Redis is unavailable *(written)*
@@ -824,7 +831,7 @@ Fill these in from real runs. Leave out any number you didn't measure.
 |---|---|
 | Throughput, `uniform` scenario (transfers/s) | 736 requests/s at 5 virtual users on a laptop ([details](docs/results/load-m6.md)) |
 | p50 / p95 / p99 latency, `uniform` | 5.2 / 13.2 / 27.6 ms (client side, k6) |
-| Throughput, `hot_account`: strategy A vs B vs C | A: 475 requests/s, p99 50 ms at 5 users; B and C not built yet |
+| Throughput, `hot_account`: strategy A vs B vs C | At maximum contention: A 388/s (p99 30 ms), B 285/s (243 abandoned), C 28/s (p99 5 s); CI runner, 8 writers ([details](docs/results/locking-benchmark.md)) |
 | Throughput, `hot_account` with sharding (stretch) | _TBD_ |
 | Operations in the concurrency run / reconciliation findings | 256,357 requests from 64 workers in 5 min / 0 findings ([details](docs/results/concurrency-m5.md)) |
 | Chaos runs passed | 2 / 5 so far: C2 and C3 ([results](docs/results/chaos-m4.md)) |
