@@ -1,7 +1,12 @@
+using Contrapost.Application.Accounts;
+using Contrapost.Application.Clients;
+using Contrapost.Application.Transfers;
+using Contrapost.Infrastructure.Ledger;
 using Contrapost.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace Contrapost.Infrastructure;
 
@@ -14,7 +19,16 @@ public static class DependencyInjection
         var connectionString = configuration.GetConnectionString("Postgres")
             ?? throw new InvalidOperationException("Connection string 'Postgres' is not configured.");
 
-        services.AddDbContext<ContrapostDbContext>(options => options.UseNpgsql(connectionString));
+        DapperSetup.Configure();
+
+        // One pool shared by EF Core (migrations, simple reads) and Dapper (the write path).
+        services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
+        services.AddDbContext<ContrapostDbContext>((provider, options) =>
+            options.UseNpgsql(provider.GetRequiredService<NpgsqlDataSource>()));
+
+        services.AddScoped<IAccountStore, AccountStore>();
+        services.AddScoped<ITransferStore, TransferStore>();
+        services.AddScoped<IClientDirectory, ClientDirectory>();
 
         services.AddHealthChecks()
             .AddCheck<SchemaHealthCheck>("postgres", tags: [ReadyTag]);
