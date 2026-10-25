@@ -59,10 +59,14 @@ services:
 
   api:
     image: contrapost-api
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # Per-client rate limiting; the API keeps serving (fails open) if Redis is down.
+      ConnectionStrings__Redis: redis:6379
     ports: ["8080:8080"]
     depends_on:
       migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
 
   # Hold expiry and the outbox relay
   worker:
