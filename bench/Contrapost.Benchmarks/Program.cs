@@ -5,6 +5,7 @@
 // reconciliation must be clean.
 //
 //   dotnet run -c Release --project bench/Contrapost.Benchmarks -- [--workers 4] [--seconds 5] [--pools 2,10,100,1000] [--out docs/results]
+//   dotnet run -c Release --project bench/Contrapost.Benchmarks -- --render results.csv --workers 8 --seconds 10   (redraw only)
 //
 // Defaults are light so it can run on a laptop alongside other work; raise --workers and --seconds on a
 // dedicated machine. Run it on a quiet machine: other load skews every cell.
@@ -24,6 +25,17 @@ using Npgsql;
 using Testcontainers.PostgreSql;
 
 var options = Options.Parse(args);
+
+// --render <csv>: redraw the chart from an earlier run (e.g. a CI artifact) without re-running it.
+if (Array.IndexOf(args, "--render") is >= 0 and var at && at + 1 < args.Length)
+{
+    var cells = Report.ReadCsv(args[at + 1]);
+    Directory.CreateDirectory(options.Out);
+    await File.WriteAllTextAsync(Path.Combine(options.Out, "locking-benchmark.svg"), Report.Svg(cells, options));
+    Console.WriteLine(Report.MarkdownTable(cells));
+    return;
+}
+
 Console.WriteLine($"workers={options.Workers} seconds={options.Seconds} pools={string.Join(",", options.Pools)} strategies={string.Join(",", options.Strategies)}");
 
 await using var postgres = new PostgreSqlBuilder("postgres:16").Build();
