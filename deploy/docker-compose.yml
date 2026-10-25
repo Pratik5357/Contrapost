@@ -5,6 +5,7 @@ name: contrapost
 x-app-env: &app-env
   ApiKeys__Environment: dev
   ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=contrapost;Username=contrapost;Password=contrapost;Gss Encryption Mode=Disable
+  ConnectionStrings__RabbitMq: amqp://contrapost:contrapost@rabbitmq:5672
 
 services:
   postgres:
@@ -24,6 +25,10 @@ services:
 
   rabbitmq:
     image: rabbitmq:4.1-management
+    environment:
+      # The default guest user may only connect from localhost, not from other containers.
+      RABBITMQ_DEFAULT_USER: contrapost
+      RABBITMQ_DEFAULT_PASS: contrapost
     ports: ["5672:5672", "15672:15672"]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -59,6 +64,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
 
+  # Hold expiry and the outbox relay
   worker:
     image: contrapost-worker
     build:
@@ -67,6 +73,18 @@ services:
     environment: *app-env
     depends_on:
       migrate: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
+
+  # Statement projector and low-balance notifier
+  consumers:
+    image: contrapost-consumers
+    build:
+      context: ..
+      dockerfile: src/Contrapost.Consumers/Dockerfile
+    environment: *app-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      rabbitmq: { condition: service_healthy }
 
 volumes:
   pgdata:
