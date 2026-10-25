@@ -9,11 +9,13 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+    <PackageReference Include="RabbitMQ.Client" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- db/ is the source of truth for the schema; migrations read it from here -->
     <EmbeddedResource Include="..\..\db\schema.sql" LogicalName="Contrapost.Infrastructure.Sql.schema.sql" />
+    <EmbeddedResource Include="..\..\db\migrations\*.sql" LogicalName="Contrapost.Infrastructure.Sql.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Applies db/schema.sql to a throwaway PostgreSQL container and runs the guard tests.
+# Applies db/schema.sql and db/migrations/*.sql to a throwaway PostgreSQL container and runs the guard tests.
 # Needs only Docker; files are piped in, not mounted. Usage: scripts/db-test.sh [postgres image tag, default 16]
 set -euo pipefail
 
@@ -25,5 +25,9 @@ psql() { docker exec -i "$name" psql -U postgres -d contrapost -v ON_ERROR_STOP=
 
 echo "== applying schema ($image)"
 psql < "$root/db/schema.sql"
+for migration in "$root"/db/migrations/*.sql; do
+  echo "== applying $(basename "$migration")"
+  psql < "$migration"
+done
 echo "== running guard tests"
 psql < "$root/db/tests/guards.sql" 2>&1 | sed -E 's/^(psql:[^ ]+ )?NOTICE:  //'
