@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Contrapost.Api/Contrapost.Api.csproj" />
+    <Project Path="src/Contrapost.Application/Contrapost.Application.csproj" />
+    <Project Path="src/Contrapost.Domain/Contrapost.Domain.csproj" />
+    <Project Path="src/Contrapost.Infrastructure/Contrapost.Infrastructure.csproj" />
+    <Project Path="src/Contrapost.Worker/Contrapost.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Contrapost.IntegrationTests/Contrapost.IntegrationTests.csproj" />
+  </Folder>
+</Solution>
