@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Contrapost.Application\Contrapost.Application.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- db/ is the source of truth for the schema; migrations read it from here -->
+    <EmbeddedResource Include="..\..\db\schema.sql" LogicalName="Contrapost.Infrastructure.Sql.schema.sql" />
+  </ItemGroup>
+
+</Project>
