@@ -111,12 +111,23 @@ internal static class LedgerSql
             db.Transaction,
             cancellationToken: cancellationToken));
 
-    /// <summary>The event payload shape for posted legs.</summary>
-    public static object LegsPayload(IEnumerable<LegView> legs) => legs.Select(l => new
-    {
-        account_id = l.AccountId,
-        direction = PgEnum.ToLabel(l.Direction),
-        amount = l.Amount,
-        account_seq = l.AccountSeq,
-    });
+    /// <summary>
+    /// The event payload shape for posted legs. Each leg carries the account's normal side and its
+    /// posted balance after the leg, so consumers needn't query the ledger (design doc §9.1).
+    /// </summary>
+    public static object LegsPayload(
+        IEnumerable<LegView> legs, IReadOnlyDictionary<Guid, AccountRow> locked, IReadOnlyDictionary<Guid, Balance> balances) =>
+        legs.Select(l =>
+        {
+            var side = PgEnum.ToNormalSide(locked[l.AccountId].NormalSide);
+            return new
+            {
+                account_id = l.AccountId,
+                direction = PgEnum.ToLabel(l.Direction),
+                amount = l.Amount,
+                account_seq = l.AccountSeq,
+                normal_side = PgEnum.ToLabel(side),
+                balance_after = balances[l.AccountId].Posted(side),
+            };
+        });
 }

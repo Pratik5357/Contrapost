@@ -103,7 +103,11 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
             captured_amount = updated.CapturedAmount,
             remaining = updated.ToState().Remaining,
             currency = row.Currency,
-            legs = LedgerSql.LegsPayload(legs),
+            legs = LedgerSql.LegsPayload(legs, locked, new Dictionary<Guid, Balance>
+            {
+                [row.DebitAccountId] = change.Value.Debit,
+                [row.CreditAccountId] = change.Value.Credit,
+            }),
         }, cancellationToken);
 
         await db.CommitAsync(cancellationToken);

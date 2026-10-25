@@ -4,6 +4,7 @@ using Contrapost.Application.Holds;
 using Contrapost.Application.Idempotency;
 using Contrapost.Application.Transfers;
 using Contrapost.Infrastructure.Ledger;
+using Contrapost.Infrastructure.Messaging;
 using Contrapost.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -41,6 +42,17 @@ public static class DependencyInjection
         services.AddHealthChecks()
             .AddCheck<SchemaHealthCheck>("postgres", tags: [ReadyTag]);
 
+        return services;
+    }
+
+    /// <summary>RabbitMQ for the processes that publish or consume events (Worker, Consumers); the API never talks to the broker.</summary>
+    public static IServiceCollection AddMessaging(this IServiceCollection services, IConfiguration configuration, string clientName)
+    {
+        var uri = configuration.GetConnectionString("RabbitMq")
+            ?? throw new InvalidOperationException("Connection string 'RabbitMq' is not configured.");
+
+        services.AddSingleton(_ => new RabbitMqConnection(uri, clientName));
+        services.AddSingleton<OutboxRelay>();
         return services;
     }
 
