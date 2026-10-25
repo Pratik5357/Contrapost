@@ -1,8 +1,9 @@
 using Contrapost.Infrastructure;
+using Contrapost.Worker.Jobs;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddInfrastructure(builder.Configuration);
-// Background jobs (outbox relay, hold expiry, reconciliation, cleanup) are registered here as they are built.
+builder.Services.AddHostedService<HoldExpiryJob>();
 
 await builder.Build().RunAsync();

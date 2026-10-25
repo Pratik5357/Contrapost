@@ -13,6 +13,8 @@ internal static class TransferEndpoints
 
     public sealed record PostTransferRequest(string? Currency, string? Reference, string? Description, IReadOnlyList<TransferLegRequest>? Legs);
 
+    public sealed record ReverseTransferRequest(string? Description);
+
     public static RouteGroupBuilder MapTransferEndpoints(this RouteGroupBuilder v1)
     {
         var transfers = v1.MapGroup("/transfers");
@@ -20,6 +22,10 @@ internal static class TransferEndpoints
             .RequireAuthorization(Scopes.TransfersWrite)
             .AddEndpointFilter<IdempotencyFilter<PostTransferRequest>>();
         transfers.MapGet("/{id:guid}", GetAsync).RequireAuthorization(Scopes.AccountsRead);
+        transfers.MapPost("/{id:guid}/reversal", ReverseAsync)
+            .RequireAuthorization(Scopes.TransfersWrite)
+            .AddEndpointFilter<IdempotencyFilter<ReverseTransferRequest>>()
+            .WithMetadata(new ReplayLocation("/v1/transfers/"));
         return v1;
     }
 
@@ -42,6 +48,16 @@ internal static class TransferEndpoints
         await transfers.GetAsync(http.GetClientId(), id, ct) is { } transfer
             ? TypedResults.Ok(transfer)
             : LedgerProblems.NotFound("transfer-not-found", "Transfer not found", $"Transfer {id} does not exist.");
+
+    private static async Task<IResult> ReverseAsync(Guid id, ReverseTransferRequest? request, HttpContext http, TransferService transfers, CancellationToken ct)
+    {
+        var result = await transfers.ReverseAsync(http.GetClientId(), id, request?.Description, ct);
+
+        // The reversal is itself a transaction, served at /v1/transfers/{id} like any other.
+        return result.IsSuccess
+            ? TypedResults.Created($"/v1/transfers/{result.Value.Id}", result.Value)
+            : result.Error!.ToProblem();
+    }
 
     /// <summary>
     /// Missing legs become an empty list for the domain rules to reject. Returns null when a leg
