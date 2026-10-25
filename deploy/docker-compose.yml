@@ -4,6 +4,11 @@ name: contrapost
 
 x-app-env: &app-env
   ApiKeys__Environment: dev
+  # Traces and metrics to the collector (design doc §12); JSON logs carry trace and span ids.
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+  OTEL_METRIC_EXPORT_INTERVAL: "5000"
+  Logging__Console__FormatterName: json
+  Logging__Console__FormatterOptions__IncludeScopes: "true"
   ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=contrapost;Username=contrapost;Password=contrapost;Gss Encryption Mode=Disable
   ConnectionStrings__RabbitMq: amqp://contrapost:contrapost@rabbitmq:5672
 
@@ -89,6 +94,50 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
+
+  # ----- Observability (design doc §12) -----
+  # Configs are baked in with dockerfile_inline instead of bind-mounted, so the stack also runs
+  # from folders Docker Desktop can't share.
+  otel-collector:
+    build:
+      context: observability
+      dockerfile_inline: |
+        FROM otel/opentelemetry-collector-contrib:0.113.0
+        COPY otel-collector.yaml /etc/otelcol-contrib/config.yaml
+    depends_on: [tempo]
+
+  prometheus:
+    build:
+      context: observability
+      dockerfile_inline: |
+        FROM prom/prometheus:v2.55.1
+        COPY prometheus.yml alerts.yml /etc/prometheus/
+    ports: ["9090:9090"]
+    depends_on: [otel-collector]
+
+  tempo:
+    build:
+      context: observability
+      dockerfile_inline: |
+        FROM grafana/tempo:2.6.1
+        COPY tempo.yaml /etc/tempo.yaml
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: root   # writes local trace storage under /var/tempo
+
+  grafana:
+    build:
+      context: observability
+      dockerfile_inline: |
+        FROM grafana/grafana:11.3.0
+        COPY grafana/datasources.yaml /etc/grafana/provisioning/datasources/
+        COPY grafana/dashboards.yaml /etc/grafana/provisioning/dashboards/
+        COPY grafana/*.json /var/lib/grafana/dashboards/
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"      # local only: open the dashboards without logging in
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/contrapost.json
+    ports: ["3300:3000"]   # 3300 on the host: 3000 is often taken by a frontend dev server
+    depends_on: [prometheus, tempo]
 
 volumes:
   pgdata:
