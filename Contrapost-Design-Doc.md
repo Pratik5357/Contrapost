@@ -274,7 +274,7 @@ sequenceDiagram
     end
 ```
 
-The idempotency row is never visible to other sessions before it is complete, because it commits with everything else. A concurrent duplicate's `INSERT` waits on the uncommitted key in the unique index. If the first request commits, the `INSERT` returns no row and the stored response is replayed. If the first request rolls back, the `INSERT` succeeds and the duplicate does the work. `lock_timeout` stops a duplicate from holding a connection while a slow request finishes.
+The idempotency row is never visible to other sessions before it is complete, because it commits with everything else. A concurrent duplicate's `INSERT` waits on the uncommitted key in the unique index. If the first request commits, the `INSERT` returns no row and the stored response is replayed. If the first request rolls back, the `INSERT` succeeds and the duplicate does the work. `lock_timeout` stops a duplicate from holding a connection while a slow request finishes. It bounds only the key claim: once the key is claimed, the request resets `lock_timeout` to the default, so waits for busy balance rows are unbounded. Ordered locking makes those waits deadlock-free, and failing them would turn contention into errors. M5's 5-minute concurrency run found exactly that bug, in which 17 of 264k requests failed.
 
 A business rejection, such as insufficient funds, is also a completed outcome. The checks run before anything else is written, so the transaction commits with only the idempotency row, which stores the 422 response. A retry then returns the same answer. Validation errors (400) are returned before `BEGIN` and are not stored.
 
@@ -606,7 +606,7 @@ All jobs run as `BackgroundService` workers in a separate **Worker** process, so
 |---|---|---|
 | Outbox relay | Continuous (poll + NOTIFY) | Publishes outbox rows to RabbitMQ |
 | Hold expiry | Every 30 s | Expires overdue holds in batches using `SKIP LOCKED` |
-| Reconciliation | Nightly, and on demand | Checks invariants I1–I8 and writes runs and findings; alerts on drift |
+| Reconciliation | Nightly (`Jobs:Reconciliation:DailyAtUtc`, default 02:00), and on demand with `Contrapost.Api reconcile` | Checks invariants I1–I8 and writes runs and findings; logs a critical alert on drift. A Postgres advisory lock allows one run at a time across Workers. Results: `GET /v1/admin/reconciliation/runs` and `/runs/{id}/findings` |
 | Idempotency cleanup | Hourly | Deletes keys older than 24 h in batches |
 | Outbox cleanup | Daily | Archives or deletes published rows older than 7 days |
 
@@ -656,9 +656,9 @@ Reconciliation never takes locks (`REPEATABLE READ, READ ONLY`). The per-account
 | Level | Tooling | What it covers |
 |---|---|---|
 | Unit | xUnit | Domain rules: leg validation, balance math, hold state transitions |
-| Property-based | FsCheck | Random sequences of operations always keep invariants I1–I8 |
+| Property-based | FsCheck (`Contrapost.PropertyTests`) | Random sequences of transfers, holds, captures, voids, expiries and reversals, run through the domain rules, keep I2–I5 and hold-status consistency after every step; transfer validation accepts exactly the well-formed transfers. FsCheck shrinks a failure to a minimal script |
 | Integration | xUnit + Testcontainers (Postgres, RabbitMQ, Redis) | Real SQL, locking, idempotency, outbox, tenant isolation |
-| Concurrency | Custom harness | N parallel workers doing random transfers, holds and captures; check all invariants at the end |
+| Concurrency | `HeadlineConcurrencyTests` in the integration tests | N parallel workers doing random transfers, holds, captures, voids, reversals and replays, with the expiry job running; reconciliation must be clean at the end. CI runs 15 s; the full run is configured with `CONTRAPOST_SOAK_*` variables |
 | Load | k6 | Throughput and latency under several scenarios |
 | Chaos | Docker + scripted kills (or Toxiproxy) | Kill or slow down components mid-run; verify invariants and event delivery |
 
@@ -732,8 +732,7 @@ contrapost/
 ├── tests/
 │   ├── Contrapost.UnitTests/
 │   ├── Contrapost.PropertyTests/
-│   ├── Contrapost.IntegrationTests/
-│   ├── Contrapost.ConcurrencyTests/
+│   ├── Contrapost.IntegrationTests/   # includes the headline concurrency test (§13.1)
 │   ├── load/                        # k6 scripts
 │   └── chaos/                       # scripts for C1–C5
 ├── db/
@@ -800,7 +799,7 @@ Fill these in from real runs. Leave out any number you didn't measure.
 | p50 / p95 / p99 latency, `uniform` | _TBD_ |
 | Throughput, `hot_account`: strategy A vs B vs C | _TBD_ |
 | Throughput, `hot_account` with sharding (stretch) | _TBD_ |
-| Operations in the concurrency run / reconciliation findings | _TBD_ / 0 |
+| Operations in the concurrency run / reconciliation findings | 256,357 requests from 64 workers in 5 min / 0 findings ([details](docs/results/concurrency-m5.md)) |
 | Chaos runs passed | 2 / 5 so far: C2 and C3 ([results](docs/results/chaos-m4.md)) |
 | Max outbox lag during the broker outage, and drain time | 124 s (18.8k rows) during a 120 s outage; drained 100 s after the broker returned, on a shared laptop ([details](docs/results/chaos-m4.md)) |
 | Hardware used for benchmarks | _TBD_ (always state it) |

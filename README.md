@@ -6,7 +6,7 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Milestone M4:
+Milestone M5 (verification; rate limiting follows separately):
 - Accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
 - API-key authentication with per-endpoint scopes.
 - Idempotency keys on every money-moving POST. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
@@ -14,7 +14,10 @@ Milestone M4:
 - Reversals of transfers and captures: at most once, and subject to overdraft rules.
 - Events: a transactional outbox, relayed to RabbitMQ with publisher confirms, consumed by a statement projector and a low-balance notifier that deduplicate through an inbox. Quorum queues with dead-letter queues hold poison messages.
 
-Not yet: reconciliation, property tests and rate limiting (M5), observability and benchmarks (M6), the admin dashboard (M7).
+- Reconciliation of invariants I1–I8, nightly in the Worker or on demand, with the results readable at `/v1/admin/reconciliation/*`.
+- Verification: a headline concurrency test (random mixed operations, then a reconciliation that must be clean) and FsCheck property tests of the domain rules.
+
+Not yet: Redis rate limiting (rest of M5), observability and benchmarks (M6), the admin dashboard (M7).
 
 ## Getting started
 
@@ -80,7 +83,14 @@ dotnet run --project src/Contrapost.Api
 Tests:
 
 ```bash
-dotnet test Contrapost.slnx    # unit tests, plus integration tests on PostgreSQL via Testcontainers
+dotnet test Contrapost.slnx    # unit, property and integration tests (PostgreSQL and RabbitMQ via Testcontainers)
+
+# The full headline concurrency run (design doc §13.1)
+CONTRAPOST_SOAK_SECONDS=300 CONTRAPOST_SOAK_WORKERS=64 CONTRAPOST_SOAK_WALLETS=1000 \
+  dotnet test tests/Contrapost.IntegrationTests -c Release --filter HeadlineConcurrency --logger "console;verbosity=detailed"
+
+# Reconcile a running stack on demand: exit code 0 clean, 2 drift found
+docker compose -f deploy/docker-compose.yml run --rm migrate reconcile
 scripts/db-test.sh             # database guard tests (Docker only)
 
 # Chaos runs against a fresh compose stack (design doc §13.3); each ends with exactly-once checks
