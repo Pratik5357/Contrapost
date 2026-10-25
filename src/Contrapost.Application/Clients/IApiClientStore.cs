@@ -12,7 +12,7 @@ public static class Scopes
 }
 
 /// <summary>What authentication needs to know about a key's client.</summary>
-public sealed record ApiClientCredentials(Guid ClientId, byte[] KeyHash, IReadOnlyList<string> Scopes);
+public sealed record ApiClientCredentials(Guid ClientId, byte[] KeyHash, IReadOnlyList<string> Scopes, int RateLimitPerMinute);
 
 public interface IApiClientStore
 {

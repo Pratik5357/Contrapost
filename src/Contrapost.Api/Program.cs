@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Contrapost.Api.Auth;
 using Contrapost.Api.Endpoints;
+using Contrapost.Api.Http;
 using Contrapost.Application;
 using Contrapost.Application.Clients;
 using Contrapost.Application.Reconciliation;
@@ -14,6 +15,7 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddProblemDetails();
 builder.Services.AddApiKeyAuth();
+var rateLimited = builder.Services.AddRateLimiting(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower;
@@ -85,8 +87,20 @@ app.MapHealthChecks("/health/ready", new HealthCheckOptions
     Predicate = check => check.Tags.Contains(Contrapost.Infrastructure.DependencyInjection.ReadyTag),
 });
 
-app.MapGroup("/v1")
-    .RequireAuthorization()
+if (!rateLimited)
+{
+#pragma warning disable CA1848 // logged once at startup; a LoggerMessage delegate buys nothing here
+    app.Logger.LogWarning("Rate limiting is disabled: ConnectionStrings:Redis is not configured");
+#pragma warning restore CA1848
+}
+
+var v1 = app.MapGroup("/v1").RequireAuthorization();
+if (rateLimited)
+{
+    v1.AddEndpointFilter<RateLimitFilter>();
+}
+
+v1
     .MapAccountEndpoints()
     .MapTransferEndpoints()
     .MapHoldEndpoints()
