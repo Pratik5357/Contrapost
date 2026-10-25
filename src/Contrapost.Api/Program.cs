@@ -7,7 +7,10 @@ using Contrapost.Application;
 using Contrapost.Application.Clients;
 using Contrapost.Application.Reconciliation;
 using Contrapost.Infrastructure;
+using Contrapost.Infrastructure.Observability;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,6 +18,9 @@ builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddProblemDetails();
 builder.Services.AddApiKeyAuth();
+builder.Services.AddTelemetry(builder.Configuration, "contrapost-api",
+    tracing => tracing.AddAspNetCoreInstrumentation(),
+    metrics => metrics.AddAspNetCoreInstrumentation());
 var rateLimited = builder.Services.AddRateLimiting(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options =>
 {

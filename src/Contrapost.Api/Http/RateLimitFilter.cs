@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Claims;
 using Contrapost.Api.Auth;
+using Contrapost.Application.Observability;
 using Contrapost.Application.RateLimiting;
 
 namespace Contrapost.Api.Http;
@@ -9,7 +10,7 @@ namespace Contrapost.Api.Http;
 /// Applies each client's <c>rate_limit_rpm</c> (design doc §11). It sits on the /v1 group, so it runs
 /// after authentication and before endpoint filters: a limited request never claims an idempotency key.
 /// </summary>
-internal sealed class RateLimitFilter(IRateLimiter limiter) : IEndpointFilter
+internal sealed class RateLimitFilter(IRateLimiter limiter, LedgerMetrics metrics) : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
@@ -23,10 +24,17 @@ internal sealed class RateLimitFilter(IRateLimiter limiter) : IEndpointFilter
         http.Response.Headers["X-RateLimit-Limit"] = limit.ToString(CultureInfo.InvariantCulture);
         http.Response.Headers["X-RateLimit-Remaining"] = decision.Remaining.ToString(CultureInfo.InvariantCulture);
 
+        if (decision.FailedOpen)
+        {
+            metrics.RecordRateLimiterFailedOpen();
+        }
+
         if (decision.Allowed)
         {
             return await next(context);
         }
+
+        metrics.RecordRateLimited();
 
         var seconds = Math.Max(1, (int)Math.Ceiling(decision.RetryAfter.TotalSeconds));
         http.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);

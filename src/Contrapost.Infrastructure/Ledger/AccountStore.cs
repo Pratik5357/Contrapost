@@ -2,6 +2,7 @@ using System.Text.Json;
 using Contrapost.Application.Accounts;
 using Contrapost.Domain;
 using Contrapost.Domain.Ledger;
+using Contrapost.Infrastructure.Observability;
 using Dapper;
 using Npgsql;
 
@@ -31,8 +32,8 @@ internal sealed class AccountStore(NpgsqlDataSource dataSource) : IAccountStore
                 INSERT INTO account_balances (account_id, debits_must_not_exceed_credits, credits_must_not_exceed_debits)
                 VALUES (@Id, @debits, @credits);
 
-                INSERT INTO outbox_messages (id, aggregate_id, type, payload)
-                VALUES (@outboxId, @Id, 'account.created', @payload::jsonb);
+                INSERT INTO outbox_messages (id, aggregate_id, type, payload, traceparent)
+                VALUES (@outboxId, @Id, 'account.created', @payload::jsonb, @traceparent);
                 """,
                 new
                 {
@@ -44,6 +45,7 @@ internal sealed class AccountStore(NpgsqlDataSource dataSource) : IAccountStore
                     flags.debits,
                     flags.credits,
                     outboxId = Guid.CreateVersion7(),
+                    traceparent = Telemetry.CurrentTraceparent(),
                     payload = JsonSerializer.Serialize(new
                     {
                         account_id = account.Id,

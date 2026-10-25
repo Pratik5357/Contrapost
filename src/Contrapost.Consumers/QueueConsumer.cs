@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Contrapost.Infrastructure.Messaging;
+using Contrapost.Infrastructure.Observability;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -57,6 +60,12 @@ public sealed partial class QueueConsumer<THandler>(
             return;
         }
 
+        // Continue the trace the relay propagated, so the handler's database work joins the original request's trace.
+        using var activity = Telemetry.StartLinked($"{envelope.Type} process", ActivityKind.Consumer, Traceparent(delivery));
+        activity?.SetTag("messaging.system", "rabbitmq");
+        activity?.SetTag("messaging.destination.name", handler.Binding.Name);
+        activity?.SetTag("messaging.message.id", envelope.Id.ToString());
+
         try
         {
             if (!await inbox.ProcessAsync(handler, envelope, cancellationToken))
@@ -68,10 +77,17 @@ public sealed partial class QueueConsumer<THandler>(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             LogFailed(ex, handler.Binding.Name, envelope.Id, envelope.Type);
             await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: true, cancellationToken);
         }
     }
+
+    /// <summary>AMQP delivers header strings as bytes.</summary>
+    private static string? Traceparent(BasicDeliverEventArgs delivery) =>
+        delivery.BasicProperties.Headers?.TryGetValue("traceparent", out var value) == true
+            ? value switch { byte[] bytes => Encoding.UTF8.GetString(bytes), string text => text, _ => null }
+            : null;
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {

@@ -1,3 +1,4 @@
+using Contrapost.Application.Observability;
 using Contrapost.Application.Transfers;
 using Contrapost.Domain;
 using Contrapost.Domain.Ledger;
@@ -7,13 +8,13 @@ using Npgsql;
 namespace Contrapost.Infrastructure.Ledger;
 
 /// <summary>Strategy A from design doc §8.1: pessimistic row locks taken in account-id order.</summary>
-internal sealed class TransferStore(NpgsqlDataSource dataSource, LedgerSession session) : ITransferStore
+internal sealed class TransferStore(NpgsqlDataSource dataSource, LedgerSession session, LedgerMetrics metrics) : ITransferStore
 {
     public async Task<Result<TransferView>> PostAsync(NewTransfer transfer, CancellationToken cancellationToken)
     {
         await using var db = await session.EnlistAsync(cancellationToken);
 
-        var locked = await LedgerSql.LockAccountsAsync(db, transfer.ClientId, transfer.Legs.Select(l => l.AccountId), cancellationToken);
+        var locked = await LedgerSql.LockAccountsAsync(db, metrics, transfer.ClientId, transfer.Legs.Select(l => l.AccountId), cancellationToken);
         var applied = TransferRules.Apply(transfer.Currency, transfer.Legs, locked.ToDictionary(kv => kv.Key, kv => kv.Value.ToLocked()));
         if (applied.Error is { } rejected)
         {
@@ -70,7 +71,7 @@ internal sealed class TransferStore(NpgsqlDataSource dataSource, LedgerSession s
         }
 
         var reversedLegs = TransferRules.Reversed(original.Legs.Select(l => new TransferLeg(l.AccountId, l.Direction, l.Amount)));
-        var locked = await LedgerSql.LockAccountsAsync(db, clientId, reversedLegs.Select(l => l.AccountId), cancellationToken);
+        var locked = await LedgerSql.LockAccountsAsync(db, metrics, clientId, reversedLegs.Select(l => l.AccountId), cancellationToken);
 
         // Checked after the locks: a concurrent reversal of the same transaction holds them until it
         // commits, so this statement sees it. Checking first also means "already reversed" wins over

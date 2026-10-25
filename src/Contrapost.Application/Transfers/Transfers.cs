@@ -1,3 +1,4 @@
+using Contrapost.Application.Observability;
 using Contrapost.Domain;
 using Contrapost.Domain.Ledger;
 
@@ -58,7 +59,7 @@ public interface ITransferStore
     Task<Result<TransferView>> ReverseAsync(Guid clientId, Guid transactionId, Guid reversalId, string? description, CancellationToken cancellationToken);
 }
 
-public sealed class TransferService(ITransferStore store)
+public sealed class TransferService(ITransferStore store, LedgerMetrics metrics)
 {
     public const int MaxReferenceLength = 128;
     public const int MaxDescriptionLength = 512;
@@ -88,6 +89,7 @@ public sealed class TransferService(ITransferStore store)
 
         if (errors.Count > 0)
         {
+            metrics.RecordTransfer("rejected", TimeSpan.Zero);
             return LedgerError.Validation(errors);
         }
 
@@ -99,7 +101,17 @@ public sealed class TransferService(ITransferStore store)
             command.Description,
             command.Legs!);
 
-        return await store.PostAsync(transfer, cancellationToken);
+        var started = LedgerMetrics.Start();
+        var result = await store.PostAsync(transfer, cancellationToken);
+        metrics.RecordTransfer(
+            result.Error switch
+            {
+                null => "posted",
+                { Code: "insufficient-funds" } => "insufficient_funds",
+                _ => "rejected",
+            },
+            LedgerMetrics.Elapsed(started));
+        return result;
     }
 
     public Task<TransferView?> GetAsync(Guid clientId, Guid transferId, CancellationToken cancellationToken) =>
