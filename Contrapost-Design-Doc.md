@@ -860,6 +860,8 @@ Fill these in from real runs. Leave out any number you didn't measure.
 
 ## 19. Case-study outline (portfolio)
 
+Written: [docs/case-study.md](docs/case-study.md).
+
 Matches the existing "6 parts" format on the portfolio:
 
 1. **The problem.** Moving money between accounts sounds like one `UPDATE`. Under concurrent requests, retries and crashes it isn't.
