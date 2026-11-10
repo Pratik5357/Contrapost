@@ -45,6 +45,29 @@ jobs:
         run: docker build -f src/Contrapost.Worker/Dockerfile -t contrapost-worker:${{ github.sha }} .
       - name: Build consumers image
         run: docker build -f src/Contrapost.Consumers/Dockerfile -t contrapost-consumers:${{ github.sha }} .
+      - name: Build admin dashboard image
+        run: docker build -t contrapost-admin:${{ github.sha }} web/admin
+
+  # The admin dashboard (design doc §5.2): type-check and production build.
+  dashboard:
+    name: Admin dashboard
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
 
   # Design doc §14: a 60-second smoke load test that fails the build if p99 or the error rate
   # crosses the thresholds in tests/load/ledger.js.

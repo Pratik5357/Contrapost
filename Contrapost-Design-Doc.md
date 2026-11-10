@@ -298,7 +298,9 @@ A small operator console that makes the ledger's state visible. It is a separate
 
 **How it works:**
 - **Server-side data fetching only.** Pages are React Server Components that call `/v1/admin/*` with an API key holding the `admin:read` scope. The key lives in the dashboard's server environment and is never sent to the browser.
-- **Operator login.** One operator account configured through environment variables (username plus a password hash), with an HTTP-only signed session cookie. The public demo deployment points at a sandbox database and can turn on a read-only guest mode.
+- **Operator login.** One operator account configured through environment variables (`ADMIN_USERNAME`, and an scrypt `ADMIN_PASSWORD_HASH` from `npm run hash-password`), with an HTTP-only session cookie signed with HMAC-SHA256 (`SESSION_SECRET`, 8-hour lifetime). The cookie carries a random session id that every API call sends as `X-Operator-Session`. The public demo deployment points at a sandbox database and can turn on a read-only guest mode (`ADMIN_GUEST_MODE=true`).
+- **Local stack.** The `admin` Compose service runs on port 3001. Its key is a fixed `cp_dev_` key that `migrate` creates when `Bootstrap:AdminApiKey` is set; `migrate` refuses any other key prefix, so this can't plant a known key in a real deployment.
+- **Bad filters.** A filter the API rejects (`400`) is shown next to the form. Other API failures show an error page with the server log's digest, because production builds don't send server error messages to the browser.
 - **Freshness.** The overview polls every 5 s; other pages load on navigation. Nothing is cached in Redis, which matches the rule that balances are always read from Postgres (§18).
 - **Metrics stay in Grafana.** The dashboard links to the Grafana panels for throughput and latency rather than re-implementing charts.
 - **Tests.** Playwright smoke tests run against the Compose stack in CI: log in, open an account, page its history, open a reconciliation run.
