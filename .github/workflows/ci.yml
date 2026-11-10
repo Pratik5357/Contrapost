@@ -88,3 +88,37 @@ jobs:
         with:
           name: k6-summary
           path: tests/load/results/
+
+  # Design doc §5.2: Playwright smoke tests of the admin dashboard against the Compose stack
+  # (log in, open an account, page its history, open a reconciliation run).
+  dashboard-smoke:
+    name: Dashboard smoke tests (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+      - name: Install dashboard dependencies and Chromium
+        working-directory: web/admin
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Start the ledger services and the dashboard
+        run: docker compose -f deploy/docker-compose.yml up -d --build --wait api worker consumers admin
+      - name: Seed the ledger
+        run: web/admin/e2e/seed.sh
+      - name: Run the smoke tests
+        working-directory: web/admin
+        run: npm run test:e2e
+      - name: Keep the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web/admin/playwright-report/
+            web/admin/test-results/
