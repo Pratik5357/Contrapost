@@ -57,7 +57,10 @@ services:
       context: ..
       dockerfile: src/Contrapost.Api/Dockerfile
     command: ["migrate"]
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # Local only: the admin dashboard's key, created here if missing (refused for non-cp_dev_ keys).
+      Bootstrap__AdminApiKey: &dashboard-key cp_dev_dashboard.local-only-not-a-secret
     depends_on:
       postgres: { condition: service_healthy }
     restart: "no"
@@ -94,6 +97,24 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       rabbitmq: { condition: service_healthy }
+
+  # Read-only operator console (design doc §5.2): http://localhost:3001, user admin, password contrapost-admin.
+  # Everything here is a local-development value; a real deployment sets its own through secrets.
+  admin:
+    image: contrapost-admin
+    build:
+      context: ../web/admin
+    environment:
+      ADMIN_API_URL: http://api:8080
+      ADMIN_API_KEY: *dashboard-key
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD_HASH: scrypt:p47irhkKNDrP9Y0zy0dLzg:ciaS7PhJSDWWnW4-qQUgbd9CS2uDrD31mrrFGYc7OGQ
+      SESSION_SECRET: local-only-session-secret-change-me-0123456789
+      SESSION_COOKIE_SECURE: "false"   # plain http locally
+      ADMIN_GUEST_MODE: "true"
+      GRAFANA_URL: http://localhost:3300
+    ports: ["3001:3000"]
+    depends_on: [api]
 
   # ----- Observability (design doc §12) -----
   # Configs are baked in with dockerfile_inline instead of bind-mounted, so the stack also runs

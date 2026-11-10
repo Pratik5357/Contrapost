@@ -34,6 +34,28 @@ var app = builder.Build();
 if (args is ["migrate", ..])
 {
     await app.Services.MigrateDatabaseAsync();
+
+    // Local stacks only: make sure the admin dashboard's fixed dev key exists, so `docker compose up`
+    // needs no manual step. Refused for anything but a cp_dev_ key, so it can't plant a key in production.
+    if (app.Configuration["Bootstrap:AdminApiKey"] is { Length: > 0 } adminKey)
+    {
+        if (!ApiKeys.TryParse(adminKey, out var prefix, out var secret) || !prefix.StartsWith("cp_dev_", StringComparison.Ordinal))
+        {
+            await Console.Error.WriteLineAsync("Bootstrap:AdminApiKey must be a cp_dev_ key; refusing to create it.");
+            Environment.ExitCode = 1;
+            return;
+        }
+
+        await using var scope = app.Services.CreateAsyncScope();
+        var clients = scope.ServiceProvider.GetRequiredService<IApiClientStore>();
+        if (await clients.FindByPrefixAsync(prefix, CancellationToken.None) is null)
+        {
+            await clients.CreateAsync(Guid.CreateVersion7(), "admin-dashboard (dev)",
+                new ApiKeys.Generated(prefix, secret, ApiKeys.Hash(secret)), [Scopes.AdminRead], CancellationToken.None);
+            Console.WriteLine($"Created the dev admin client {prefix}.");
+        }
+    }
+
     return;
 }
 
