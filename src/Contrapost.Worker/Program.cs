@@ -8,7 +8,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddMessaging(builder.Configuration, "contrapost-worker");
 builder.Services.AddTelemetry(builder.Configuration, "contrapost-worker");
 builder.Services.AddSingleton<LedgerHealthMetrics>();
-builder.Services.AddHostedService<OutboxMonitorJob>();
+builder.Services.AddHostedService<LedgerHealthMonitorJob>();
 builder.Services.AddHostedService<HoldExpiryJob>();
 builder.Services.AddHostedService<OutboxRelayJob>();
 builder.Services.AddHostedService<ReconciliationJob>();
