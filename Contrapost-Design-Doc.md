@@ -834,7 +834,7 @@ Fill these in from real runs. Leave out any number you didn't measure.
 | Throughput, `hot_account`: strategy A vs B vs C | At maximum contention: A 388/s (p99 30 ms), B 285/s (243 abandoned), C 28/s (p99 5 s); CI runner, 8 writers ([details](docs/results/locking-benchmark.md)) |
 | Throughput, `hot_account` with sharding (stretch) | _TBD_ |
 | Operations in the concurrency run / reconciliation findings | 256,357 requests from 64 workers in 5 min / 0 findings ([details](docs/results/concurrency-m5.md)) |
-| Chaos runs passed | 2 / 5 so far: C2 and C3 ([results](docs/results/chaos-m4.md)) |
+| Chaos runs passed | 3 / 5 so far: C1 ([results](docs/results/chaos-m6.md)), C2 and C3 ([results](docs/results/chaos-m4.md)) |
 | Max outbox lag during the broker outage, and drain time | 124 s (18.8k rows) during a 120 s outage; drained 100 s after the broker returned, on a shared laptop ([details](docs/results/chaos-m4.md)) |
 | Hardware used for benchmarks | Apple M3, 8 GB RAM; Docker Desktop with 8 CPUs and 3.8 GB, everything on one machine |
 

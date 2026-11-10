@@ -15,6 +15,8 @@ fresh_stack() {
   compose up -d --build --wait --wait-timeout 300 >/dev/null 2>&1
   KEY="$("$root/scripts/seed.sh" chaos 2>/dev/null | sed -n 's/^api_key: //p')"
   [ -n "$KEY" ] || { echo "could not create an API key" >&2; exit 1; }
+  # The runs test recovery, not the per-client rate limit (C5 covers the limiter).
+  sql "UPDATE api_clients SET rate_limit_rpm = 100000000 WHERE key_prefix = '${KEY%%.*}'" >/dev/null
 }
 
 create_account() { # code normal_side prevent_overdraft
