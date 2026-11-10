@@ -5,7 +5,8 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 api=http://localhost:8080
 results="$(mktemp -d)"
 
-compose() { docker compose -f "$root/deploy/docker-compose.yml" "$@"; }
+# A run can add a Compose overlay by setting COMPOSE_OVERLAY to its path.
+compose() { docker compose -f "$root/deploy/docker-compose.yml" ${COMPOSE_OVERLAY:+-f "$COMPOSE_OVERLAY"} "$@"; }
 sql() { compose exec -T postgres psql -U contrapost -d contrapost -tAq -c "$1"; }
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 
@@ -58,6 +59,42 @@ run_load() { # seconds parallel
   done
   wait
   cat "$results"/status.* > "$results/status"
+}
+
+# Like run_load, but each transfer keeps its idempotency key across retries (connection refused,
+# 5xx, or 409 request-in-progress) for up to 60 s. One line per transfer in $results/load: final
+# status, attempts, whether the 201 was a replay, and the final attempt's seconds. Statuses are
+# appended to $results/status, so several calls add up.
+run_retrying_load() { # seconds parallel
+  local deadline=$(( $(date +%s) + $1 ))
+  for p in $(seq 1 "$2"); do
+    (
+      n=0; headers="$results/headers.$p"
+      while [ "$(date +%s)" -lt "$deadline" ]; do
+        from=${WALLETS[$((RANDOM % ${#WALLETS[@]}))]}
+        to=${WALLETS[$((RANDOM % ${#WALLETS[@]}))]}
+        [ "$from" = "$to" ] && continue
+        n=$((n + 1)); key="load-$p-$n-$RANDOM"; amount=$((RANDOM % 1000 + 1))
+        attempts=0; give_up=$(( $(date +%s) + 60 ))
+        while :; do
+          attempts=$((attempts + 1))
+          status=$(curl -s -m 10 -D "$headers" -o /dev/null -w '%{http_code} %{time_total}' \
+            -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -H "Idempotency-Key: $key" \
+            "$api/v1/transfers" \
+            -d "{\"currency\":\"INR\",\"legs\":[{\"account_id\":\"$from\",\"direction\":\"debit\",\"amount\":$amount},{\"account_id\":\"$to\",\"direction\":\"credit\",\"amount\":$amount}]}" ||
+            true)
+          seconds=${status#* }; status=${status%% *}
+          case "$status" in 000|409|5??) [ "$(date +%s)" -lt "$give_up" ] && { sleep 0.2; continue; } ;; esac
+          break
+        done
+        replayed=$(grep -qi '^Idempotent-Replayed: true' "$headers" && echo replay || echo fresh)
+        echo "$status $attempts $replayed $seconds"
+      done > "$results/load.$p"
+    ) &
+  done
+  wait
+  cat "$results"/load.* > "$results/load"; rm "$results"/load.*
+  cut -d' ' -f1 "$results/load" >> "$results/status"
 }
 
 unpublished() { sql "SELECT count(*) FROM outbox_messages WHERE published_at IS NULL"; }

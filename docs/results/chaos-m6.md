@@ -31,4 +31,33 @@ Every retried transfer was posted exactly once. A request that was inside its da
 
 None of the retries in this run were replays. That would need a kill to land after a transfer's commit but before its response was sent, a window of well under a millisecond. The replay path is covered by the M5 concurrency run and the idempotency integration tests; C1 shows that a crash never leaves a half-posted transfer or a key stuck in progress.
 
+## C4: 200 ms of Postgres latency under load
+
+```
+tests/chaos/c4-db-latency.sh  # LATENCY_MS=200, 20 s baseline, 40 s with latency, 20 s recovery, PARALLEL=4
+```
+
+The run adds a Compose overlay (`tests/chaos/toxiproxy.compose.yml`) that puts Toxiproxy between Postgres and the API, Worker and Consumers; migrations still connect directly. The same four retrying clients as in C1 run through three phases, and a Toxiproxy `latency` toxic adds 200 ms to every Postgres response during the middle one.
+
+| Phase | Transfers | Transfers/s | p50 | p95 | Retried |
+|---|---|---|---|---|---|
+| Baseline (20 s) | 2,445 | 122 | 8 ms | 18 ms | 0 |
+| 200 ms latency (40 s) | 68 | 1.7 | 2,247 ms | 3,480 ms | 0 |
+| Recovery (20 s) | 2,868 | 143 | 7 ms | 14 ms | 0 |
+
+| Check | Value |
+|---|---|
+| Transfers sent, all ending in `201` | 5,381 |
+| Transfers posted / sent (plus 20 funding transfers) | 5,401 / 5,401 |
+| Deadlocks reported by Postgres (`pg_stat_database`) | 0 |
+| Money held by the wallets | 2,000,000,000, unchanged |
+| Events handled per consumer | 5,401, exactly once each |
+| Statement rows / postings | 10,802 / 10,802 |
+| Balance drift (I3) | 0 accounts |
+| Outcome | **Passed** |
+
+Correctness held and nothing deadlocked: ordered locking means slower transactions only wait longer, never in a cycle. No transfer hit the 5 s `lock_timeout`, so none needed a retry. Throughput recovered as soon as the toxic was removed.
+
+**Observation for the cloud deploy:** a median of 2.2 s at 200 ms per round trip means a transfer makes roughly 11 sequential round trips to Postgres (a little less, since new pooled connections also pay the latency during their handshake). That is invisible on a local socket, but with a managed database in another zone (1–2 ms per round trip) it adds 10–20 ms to every transfer. Batching the statements in a transfer (Npgsql batching, or one function call) would cut that if it shows up in production numbers. The API and the database should be deployed in the same region.
+
 **Found while building C1:** the M4 chaos load (C2, C3) predates the M5 rate limiter and now gets `429`s after the first 600 requests a minute. `tests/chaos/lib.sh` now raises the limit for the run's client, so all chaos scripts work against the current API.
