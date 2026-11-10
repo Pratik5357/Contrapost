@@ -2,11 +2,11 @@
 
 A double-entry payments ledger in .NET: correct balances under concurrent load, exactly-once effects for retried requests, and reliable event publishing through a transactional outbox.
 
-The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
+The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md). For the story and the results in one place, read the [case study](docs/case-study.md).
 
 ## Status
 
-Milestone M7 done; M6 done except the cloud deployment:
+Milestones M0–M8 done, except the cloud deployment (M6):
 - Accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
 - API-key authentication with per-endpoint scopes.
 - Idempotency keys on every money-moving POST. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
