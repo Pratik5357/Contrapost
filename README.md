@@ -6,7 +6,7 @@ The design is in [`Contrapost-Design-Doc.md`](Contrapost-Design-Doc.md).
 
 ## Status
 
-Milestones M6 and M7 (in progress):
+Milestone M7 done; M6 done except the cloud deployment:
 - Accounts, multi-leg transfers with ordered row locking and overdraft rules, balances and keyset-paged history.
 - API-key authentication with per-endpoint scopes.
 - Idempotency keys on every money-moving POST. The key is claimed in the same database transaction as the ledger writes, so a retry replays the stored response and never posts twice.
@@ -16,7 +16,7 @@ Milestones M6 and M7 (in progress):
 - Events: a transactional outbox, relayed to RabbitMQ with publisher confirms, consumed by a statement projector and a low-balance notifier that deduplicate through an inbox. Quorum queues with dead-letter queues hold poison messages.
 - Reconciliation of invariants I1–I8, nightly in the Worker or on demand, with the results readable at `/v1/admin/reconciliation/*`.
 - Admin API (M7): cross-tenant, read-only `/v1/admin/*` reads for the operator dashboard (overview, account search and detail, transactions, holds, outbox, reconciliation), each logged with the operator session ([ADR-010](docs/adr/ADR-010-read-only-admin-through-the-api.md)).
-- Admin dashboard (M7): a read-only Next.js operator console in `web/admin` (overview, accounts, transactions, holds, reconciliation, outbox) with operator login, served on port 3001 by the Compose stack.
+- Admin dashboard (M7): a read-only Next.js operator console in `web/admin` (overview, accounts, transactions, holds, reconciliation, outbox) with operator login, served on port 3001 by the Compose stack, with Playwright smoke tests in CI.
 - Verification: a headline concurrency test (random mixed operations, then a reconciliation that must be clean) and FsCheck property tests of the domain rules.
 
 - Observability: OpenTelemetry traces (one trace per transfer, from the API through the outbox relay to the consumers), the `ledger_*` metrics, and a Grafana dashboard with Prometheus alerts.
@@ -27,7 +27,7 @@ Milestones M6 and M7 (in progress):
 
 - Chaos runs C1 (API killed under load), C2 (broker outage), C3 (relay killed mid-batch), C4 (200 ms Postgres latency) and C5 (Redis down, the rate limiter fails open) ([C1, C4 and C5 results](docs/results/chaos-m6.md), [C2 and C3 results](docs/results/chaos-m4.md)).
 
-Not yet: the cloud deployment (rest of M6), the admin dashboard (M7).
+Not yet: the cloud deployment (rest of M6).
 
 ## Getting started
 
@@ -114,6 +114,11 @@ tests/chaos/c5-redis-down.sh      # stop Redis; the rate limiter fails open and 
 # Load scenarios with k6 (design doc §13.2): uniform | hot_account | retry_storm | mixed
 tests/load/run.sh mixed                       # light by default: 5 users for 30 s
 VUS=32 DURATION=2m tests/load/run.sh uniform  # heavier, opt-in
+
+# Dashboard smoke tests (Playwright) against the running stack, as CI runs them
+docker compose -f deploy/docker-compose.yml up -d --build --wait api worker consumers admin
+web/admin/e2e/seed.sh                          # an account with two pages of entries, and a reconciliation run
+(cd web/admin && npm ci && npx playwright install chromium && npm run test:e2e)
 ```
 
 Local tools:

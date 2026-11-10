@@ -25,3 +25,6 @@ appsettings.*.local.json
 
 # Load test output
 tests/load/results/
+
+# Personal Claude Code settings
+.claude/settings.local.json
