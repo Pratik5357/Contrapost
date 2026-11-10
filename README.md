@@ -24,9 +24,9 @@ Milestone M6 (in progress):
 
 - Locking-strategy benchmark: pessimistic (production) vs optimistic vs serializable against contention, on a dedicated CI runner ([results](docs/results/locking-benchmark.md), [ADR-003](docs/adr/ADR-003-pessimistic-ordered-locking.md)).
 
-- Chaos runs C1 (API killed under load), C2 (broker outage) and C3 (relay killed mid-batch) ([C1 results](docs/results/chaos-m6.md), [C2 and C3 results](docs/results/chaos-m4.md)).
+- Chaos runs C1 (API killed under load), C2 (broker outage), C3 (relay killed mid-batch), C4 (200 ms Postgres latency) and C5 (Redis down, the rate limiter fails open) ([C1, C4 and C5 results](docs/results/chaos-m6.md), [C2 and C3 results](docs/results/chaos-m4.md)).
 
-Not yet: chaos runs C4 and C5 and the cloud deployment (rest of M6), the admin dashboard (M7).
+Not yet: the cloud deployment (rest of M6), the admin dashboard (M7).
 
 ## Getting started
 
@@ -106,6 +106,8 @@ scripts/db-test.sh             # database guard tests (Docker only)
 tests/chaos/c1-api-kill.sh        # SIGKILL the API under load; clients retry with the same key (KILLS, default 3)
 tests/chaos/c2-broker-outage.sh   # stop RabbitMQ under load (OUTAGE_SECONDS, default 120)
 tests/chaos/c3-relay-crash.sh     # SIGKILL the relay mid-batch while it drains a backlog (KILLS, default 8)
+tests/chaos/c4-db-latency.sh      # 200 ms Postgres latency through Toxiproxy (LATENCY_MS, default 200)
+tests/chaos/c5-redis-down.sh      # stop Redis; the rate limiter fails open and alerts (LIMIT_RPM, default 300)
 
 # Load scenarios with k6 (design doc §13.2): uniform | hot_account | retry_storm | mixed
 tests/load/run.sh mixed                       # light by default: 5 users for 30 s
@@ -134,7 +136,7 @@ Grafana is on 3300 because 3000 is often taken by a frontend dev server.
 | `src/Contrapost.Infrastructure` | EF Core, SQL, broker and cache adapters; migrations embed `db/schema.sql` |
 | `db/` | Baseline schema, numbered migrations, guard tests |
 | `deploy/` | Docker Compose |
-| `tests/chaos/` | Chaos runs C1, C2 and C3 |
+| `tests/chaos/` | Chaos runs C1–C5 |
 | `docs/adr/` | Architecture decision records |
 
 ## Development workflow

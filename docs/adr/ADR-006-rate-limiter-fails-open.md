@@ -12,7 +12,7 @@ Each API client has a `rate_limit_rpm`. The API enforces it with a sliding-windo
 
 ## Decision
 
-Fail open. When Redis can't be reached, the request proceeds and the API logs `Rate limiter unavailable, allowing request …` at warning level. A metric follows in M6.
+Fail open. When Redis can't be reached, the request proceeds and the API logs `Rate limiter unavailable, allowing request …` at warning level, counts it in `ledger_rate_limiter_failed_open_total`, and Prometheus raises the `RateLimiterFailingOpen` warning alert.
 
 The connection is set to fail fast, so the outage costs nothing per request:
 
@@ -22,6 +22,6 @@ The connection is set to fail fast, so the outage costs nothing per request:
 ## Consequences
 
 - **A Redis outage can't take the ledger down.** The rate limiter protects the API from overload; it isn't part of correctness. Moving money is guarded by Postgres (locks, constraints, idempotency keys), none of which depends on Redis.
-- **During an outage, clients can exceed their limits.** The risk is load, not wrong balances. The warning log (and later the metric and alert) makes the window visible. Chaos run C5 exercises it.
+- **During an outage, clients can exceed their limits.** The risk is load, not wrong balances. The warning log, the metric and the alert make the window visible. Chaos run C5 exercises it ([results](../results/chaos-m6.md)): 4,280 requests went through unchecked during a 30 s outage, the alert fired, and limiting resumed within about 2 s of Redis returning.
 - **Measured** on the Compose stack: with Redis stopped, requests took 3–4 ms. Before fail-fast was set, they took 0.7–1 s each, because commands waited in the client's backlog. After Redis restarted, limiting resumed without intervention.
 - **If abuse during outages became a real concern,** a local in-memory limiter could take over as a fallback, at the cost of per-instance (not global) limits.

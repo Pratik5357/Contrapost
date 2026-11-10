@@ -31,3 +31,10 @@ groups:
         labels: { severity: critical }
         annotations:
           summary: '{{ $value | humanizePercentage }} of API requests are failing with 5xx.'
+
+      # ADR-006: while Redis is unreachable the limiter lets every request through, unlimited.
+      - alert: RateLimiterFailingOpen
+        expr: sum(increase(ledger_rate_limiter_failed_open_total[1m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: The rate limiter let {{ $value | humanize }} requests through unchecked in the last minute; Redis is unreachable.

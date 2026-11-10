@@ -1,0 +1,27 @@
+# Overlay for C4: the app services reach Postgres through Toxiproxy, so the run can add latency.
+# Used with the main file: docker compose -f deploy/docker-compose.yml -f tests/chaos/toxiproxy.compose.yml
+# Paths resolve against deploy/ (the first file's folder). The config is baked in, not bind-mounted.
+x-via-toxiproxy: &via-toxiproxy
+  ConnectionStrings__Postgres: Host=toxiproxy;Port=15432;Database=contrapost;Username=contrapost;Password=contrapost;Gss Encryption Mode=Disable
+
+services:
+  toxiproxy:
+    build:
+      context: ../tests/chaos/toxiproxy
+      dockerfile_inline: |
+        FROM ghcr.io/shopify/toxiproxy:2.9.0
+        COPY toxiproxy.json /config.json
+    command: ["-host=0.0.0.0", "-config=/config.json"]
+    ports: ["8474:8474"]   # control API
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    environment: *via-toxiproxy
+    depends_on: [toxiproxy]
+  worker:
+    environment: *via-toxiproxy
+    depends_on: [toxiproxy]
+  consumers:
+    environment: *via-toxiproxy
+    depends_on: [toxiproxy]
