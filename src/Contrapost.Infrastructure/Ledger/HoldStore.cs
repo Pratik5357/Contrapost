@@ -14,11 +14,6 @@ namespace Contrapost.Infrastructure.Ledger;
 /// </summary>
 internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession session, LedgerMetrics metrics) : IHoldStore
 {
-    private const string HoldColumns = """
-        id, debit_account_id, credit_account_id, currency, amount, captured_amount,
-        status::text AS status, expires_at, created_at, now() AS db_now
-        """;
-
     public async Task<Result<HoldView>> CreateAsync(NewHold hold, CancellationToken cancellationToken)
     {
         await using var db = await session.EnlistAsync(cancellationToken);
@@ -36,7 +31,7 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
             $"""
             INSERT INTO holds (id, client_id, debit_account_id, credit_account_id, currency, amount, expires_at)
             VALUES (@Id, @ClientId, @DebitAccountId, @CreditAccountId, @Currency, @Amount, now() + make_interval(secs => @ExpiresInSeconds))
-            RETURNING {HoldColumns}
+            RETURNING {HoldRow.Columns}
             """,
             hold,
             db.Transaction,
@@ -61,7 +56,7 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         var row = await connection.QuerySingleOrDefaultAsync<HoldRow>(new CommandDefinition(
-            $"SELECT {HoldColumns} FROM holds WHERE id = @holdId AND client_id = @clientId",
+            $"SELECT {HoldRow.Columns} FROM holds WHERE id = @holdId AND client_id = @clientId",
             new { holdId, clientId },
             cancellationToken: cancellationToken));
         return row?.ToView();
@@ -155,7 +150,7 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
         // SKIP LOCKED: holds being captured or voided right now, or taken by another worker, are left alone.
         var due = (await db.Connection.QueryAsync<HoldRow>(new CommandDefinition(
             $"""
-            SELECT {HoldColumns}
+            SELECT {HoldRow.Columns}
             FROM holds
             WHERE status IN ('pending', 'partially_captured') AND expires_at <= now()
             ORDER BY expires_at
@@ -208,7 +203,7 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
 
     private static Task<HoldRow?> LockHoldAsync(Enlistment db, Guid clientId, Guid holdId, CancellationToken cancellationToken) =>
         db.Connection.QuerySingleOrDefaultAsync<HoldRow>(new CommandDefinition(
-            $"SELECT {HoldColumns} FROM holds WHERE id = @holdId AND client_id = @clientId FOR UPDATE",
+            $"SELECT {HoldRow.Columns} FROM holds WHERE id = @holdId AND client_id = @clientId FOR UPDATE",
             new { holdId, clientId },
             db.Transaction,
             cancellationToken: cancellationToken));
@@ -230,33 +225,9 @@ internal sealed class HoldStore(NpgsqlDataSource dataSource, LedgerSession sessi
             $"""
             UPDATE holds SET captured_amount = @CapturedAmount, status = @status::hold_status
             WHERE id = @holdId
-            RETURNING {HoldColumns}
+            RETURNING {HoldRow.Columns}
             """,
             new { holdId, change.CapturedAmount, status = HoldRules.Label(change.Status) },
             db.Transaction,
             cancellationToken: cancellationToken));
-
-    private sealed class HoldRow
-    {
-        public Guid Id { get; init; }
-        public Guid DebitAccountId { get; init; }
-        public Guid CreditAccountId { get; init; }
-        public string Currency { get; init; } = "";
-        public long Amount { get; init; }
-        public long CapturedAmount { get; init; }
-        public string Status { get; init; } = "";
-        public DateTimeOffset ExpiresAt { get; init; }
-        public DateTimeOffset CreatedAt { get; init; }
-        public DateTimeOffset DbNow { get; init; }
-
-        public HoldState ToState() => new(Id, DebitAccountId, CreditAccountId, Currency, Amount, CapturedAmount,
-            PgEnum.ToHoldStatus(Status), ExpiresAt);
-
-        public HoldView ToView()
-        {
-            var state = ToState();
-            return new HoldView(Id, state.Status, DebitAccountId, CreditAccountId, Currency, Amount, CapturedAmount,
-                state.Remaining, ExpiresAt, CreatedAt);
-        }
-    }
 }
