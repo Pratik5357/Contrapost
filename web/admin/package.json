@@ -7,8 +7,7 @@
     "build": "next build",
     "start": "next start --port 3001",
     "typecheck": "tsc --noEmit",
-    "hash-password": "node scripts/hash-password.mjs",
-    "test:e2e": "playwright test"
+    "hash-password": "node scripts/hash-password.mjs"
   },
   "dependencies": {
     "next": "16.4.6",
