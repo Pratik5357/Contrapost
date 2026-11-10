@@ -2,7 +2,7 @@
 # Used with the main file: docker compose -f deploy/docker-compose.yml -f tests/chaos/toxiproxy.compose.yml
 # Paths resolve against deploy/ (the first file's folder). The config is baked in, not bind-mounted.
 x-via-toxiproxy: &via-toxiproxy
-  ConnectionStrings__Postgres: Host=toxiproxy;Port=15432;Database=contrapost;Username=contrapost;Password=contrapost;Gss Encryption Mode=Disable
+  ConnectionStrings__Postgres: Host=toxiproxy;Port=15432;Database=contrapost;Username=contrapost_api;Password=contrapost-api;Gss Encryption Mode=Disable
 
 services:
   toxiproxy:

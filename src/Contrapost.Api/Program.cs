@@ -35,6 +35,15 @@ if (args is ["migrate", ..])
 {
     await app.Services.MigrateDatabaseAsync();
 
+    // The services' login (design doc §11): a member of the least-privilege contrapost_app role. The
+    // password comes from configuration (a secret in a real deployment), never from the migrations.
+    if (app.Configuration["Bootstrap:AppUser"] is { Length: > 0 } appUser
+        && app.Configuration["Bootstrap:AppPassword"] is { Length: > 0 } appPassword)
+    {
+        await app.Services.EnsureAppLoginAsync(appUser, appPassword);
+        Console.WriteLine($"Login {appUser} is ready as a member of contrapost_app.");
+    }
+
     // Local stacks only: make sure the admin dashboard's fixed dev key exists, so `docker compose up`
     // needs no manual step. Refused for anything but a cp_dev_ key, so it can't plant a key in production.
     if (app.Configuration["Bootstrap:AdminApiKey"] is { Length: > 0 } adminKey)

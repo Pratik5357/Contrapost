@@ -5,6 +5,7 @@ using Contrapost.Application.Holds;
 using Contrapost.Application.Idempotency;
 using Contrapost.Application.RateLimiting;
 using Contrapost.Application.Reconciliation;
+using Contrapost.Application.Retention;
 using Contrapost.Application.Transfers;
 using Contrapost.Infrastructure.Admin;
 using Contrapost.Infrastructure.Ledger;
@@ -12,6 +13,8 @@ using Contrapost.Infrastructure.Messaging;
 using Contrapost.Infrastructure.Persistence;
 using Contrapost.Infrastructure.RateLimiting;
 using Contrapost.Infrastructure.Reconciliation;
+using Contrapost.Infrastructure.Retention;
+using Dapper;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -50,6 +53,7 @@ public static class DependencyInjection
             EventWindow: TimeSpan.FromDays(configuration.GetValue("Reconciliation:EventWindowDays", 6))));
         services.AddScoped<IReconciliationStore, ReconciliationStore>();
         services.AddScoped<IAdminStore, AdminStore>();
+        services.AddScoped<IRetentionStore, RetentionStore>();
 
         services.AddScoped<LedgerSession>();
         services.AddScoped<IIdempotencyScope>(provider => provider.GetRequiredService<LedgerSession>());
@@ -102,5 +106,25 @@ public static class DependencyInjection
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<ContrapostDbContext>();
         await db.Database.MigrateAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Creates (or updates the password of) a login that belongs to contrapost_app, the least-privilege role
+    /// from migration 005. Run by `migrate`, as the owner, so the services never need the owner's login.
+    /// </summary>
+    public static async Task EnsureAppLoginAsync(this IServiceProvider services, string user, string password, CancellationToken cancellationToken = default)
+    {
+        var dataSource = services.GetRequiredService<NpgsqlDataSource>();
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        var exists = await connection.ExecuteScalarAsync<bool>(new CommandDefinition(
+            "SELECT EXISTS (SELECT FROM pg_roles WHERE rolname = @user)", new { user }, cancellationToken: cancellationToken));
+
+        // DDL takes no parameters, so the server's format() quotes the name (%I) and the password (%L).
+        foreach (var template in new[] { exists ? "ALTER ROLE %I LOGIN PASSWORD %L" : "CREATE ROLE %I LOGIN PASSWORD %L", "GRANT contrapost_app TO %I" })
+        {
+            var ddl = await connection.ExecuteScalarAsync<string>(new CommandDefinition(
+                "SELECT format(@template, @user::text, @password::text)", new { template, user, password }, cancellationToken: cancellationToken));
+            await connection.ExecuteAsync(new CommandDefinition(ddl!, cancellationToken: cancellationToken));
+        }
     }
 }

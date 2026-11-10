@@ -351,7 +351,7 @@ The code is not the only line of defence. Every guard below has a test in [`db/t
 | Guard | Mechanism | Error |
 |---|---|---|
 | Balanced transactions (≥ 2 postings, Σ debits = Σ credits) | `DEFERRABLE INITIALLY DEFERRED` constraint triggers on both `transactions` (catches a transaction with no postings) and `postings` (catches postings added later) | `CP001` |
-| Append-only postings and transactions | Statement-level triggers on `UPDATE`, `DELETE` and `TRUNCATE` (planned: an API role without those privileges, see §11) | `CP002` |
+| Append-only postings and transactions | Statement-level triggers on `UPDATE`, `DELETE` and `TRUNCATE`; the services' role (`contrapost_app`, §11) also lacks those privileges | `CP002` |
 | Hold lifecycle (terminal states final, terms immutable, `captured_amount` never decreases, no return to `pending`) | Row trigger on `holds`; no deletes | `CP003` |
 | Only transfers and captures can be reversed | Row trigger on `transactions` | `CP004` |
 | Same tenant and currency across postings, transactions, holds and accounts | Composite foreign keys | `23503` |
@@ -617,8 +617,8 @@ All jobs run as `BackgroundService` workers in a separate **Worker** process, so
 | Outbox relay | Continuous (poll + NOTIFY) | Publishes outbox rows to RabbitMQ |
 | Hold expiry | Every 30 s | Expires overdue holds in batches using `SKIP LOCKED` |
 | Reconciliation | Nightly (`Jobs:Reconciliation:DailyAtUtc`, default 02:00), and on demand with `Contrapost.Api reconcile` | Checks invariants I1–I8 and writes runs and findings; logs a critical alert on drift. A Postgres advisory lock allows one run at a time across Workers. Results: `GET /v1/admin/reconciliation/runs` and `/runs/{id}/findings` |
-| Idempotency cleanup *(not built yet)* | Hourly | Deletes keys older than 24 h in batches. Until it exists keys are kept, so an old key is replayed rather than treated as new |
-| Outbox cleanup *(not built yet)* | Daily | Archives or deletes published rows older than 7 days. Until it exists rows are kept; the partial index keeps the relay fast |
+| Idempotency cleanup | Hourly, and at startup | Deletes completed keys older than 24 h, 1,000 per batch with `SKIP LOCKED` (`RetentionJob`) |
+| Outbox cleanup | Daily, and at startup | Deletes published rows older than 7 days in batches, using the `ix_outbox_published` index (migration 005). Unpublished rows are never deleted |
 
 Reconciliation never takes locks (`REPEATABLE READ, READ ONLY`). The per-account and per-hold checks (I3–I6) scan in id chunks, each in its own short snapshot. That is safe because an account's balances, postings and holds always change together in one transaction, so any single snapshot is consistent for the rows it covers. Short snapshots also avoid holding back vacuum on a large `postings` table. The global checks (I1, I2, I7, I8) are aggregate queries, each run in a single snapshot.
 
@@ -635,7 +635,7 @@ Reconciliation never takes locks (`REPEATABLE READ, READ ONLY`). The per-account
   - **Responses:** a limited request gets `429 rate-limited` with `Retry-After`, and every response carries `X-RateLimit-Limit` and `X-RateLimit-Remaining`.
   - **Fails open:** if Redis is unavailable, requests proceed and a warning is logged ([ADR-006](docs/adr/ADR-006-rate-limiter-fails-open.md)). With fail-fast connection settings an outage costs about 3 ms per request.
 - **Request limits:** maximum body size, maximum legs per transfer, input validation with FluentValidation.
-- **Least-privilege database roles** *(not built yet)***:** the API role cannot `UPDATE` or `DELETE` postings or transactions; the migration role is separate. Today every process connects as the owner, and the append-only triggers are the barrier.
+- **Least-privilege database roles:** migration 005 creates `contrapost_app`, which can read and write what the services need but has only `SELECT` and `INSERT` on postings and transactions. The API, Worker and Consumers log in as a member of it (`contrapost_api` locally, created by `migrate` from `Bootstrap:AppUser` and `Bootstrap:AppPassword`); only `migrate` uses the owner. The integration tests run every host as such a login.
 - **Secrets** are supplied through environment variables or the host's secret store, never committed.
 
 ---
@@ -852,7 +852,7 @@ Fill these in from real runs. Leave out any number you didn't measure.
 | Hot-account contention limits throughput | Measure and document it; sharding is a stretch goal |
 | `postings` table growth slows reconciliation | Chunked scans; consider monthly partitioning if it gets large |
 | Free-tier hosting distorts benchmarks | Benchmark locally on stated hardware; the cloud deploy is for the demo only |
-| Outbox table bloat | Partial index on unpublished rows (built); daily cleanup job (not built yet) |
+| Outbox table bloat | Partial index on unpublished rows, and the daily cleanup of published rows |
 | ~~Open:~~ controllers or Minimal APIs? | **Decided:** Minimal APIs, see [ADR-009](docs/adr/ADR-009-minimal-apis.md) |
 | **Open:** should balances also be cached in Redis for reads? | Default **no**: balances are always read from Postgres to avoid stale values |
 
