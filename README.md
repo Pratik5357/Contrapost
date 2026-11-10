@@ -145,7 +145,7 @@ Grafana is on 3300 because 3000 is often taken by a frontend dev server.
 | `web/admin` | Admin dashboard (Next.js, read-only, design doc §5.2) |
 | `deploy/` | Docker Compose |
 | `tests/chaos/` | Chaos runs C1–C5 |
-| `docs/adr/` | Architecture decision records |
+| `docs/adr/` | Architecture decision records ([index](docs/adr/README.md)) |
 
 ## Development workflow
 
