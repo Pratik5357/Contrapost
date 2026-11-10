@@ -250,4 +250,36 @@ SELECT pg_temp.expect_error('response body without a response code is rejected',
         ('c1000000-0000-0000-0000-000000000000', 'k1', 'POST', '/v1/transfers', '\x00', '{}');
 $sql$);
 
+\warn '--- least-privilege app role (migration 005)'
+
+-- Privileges are checked before triggers fire, so these fail with 42501 even though CP002 would too.
+DO $$
+BEGIN
+    SET LOCAL ROLE contrapost_app;
+    PERFORM count(*) FROM postings;
+    PERFORM count(*) FROM transactions;
+    RAISE NOTICE 'pass  app role can read postings and transactions';
+    BEGIN
+        UPDATE postings SET amount = amount;
+        RAISE EXCEPTION 'FAIL  app role could UPDATE postings';
+    EXCEPTION WHEN insufficient_privilege THEN
+        RAISE NOTICE 'pass  app role cannot UPDATE postings';
+    END;
+    BEGIN
+        DELETE FROM transactions;
+        RAISE EXCEPTION 'FAIL  app role could DELETE transactions';
+    EXCEPTION WHEN insufficient_privilege THEN
+        RAISE NOTICE 'pass  app role cannot DELETE transactions';
+    END;
+    BEGIN
+        TRUNCATE postings;
+        RAISE EXCEPTION 'FAIL  app role could TRUNCATE postings';
+    EXCEPTION WHEN insufficient_privilege THEN
+        RAISE NOTICE 'pass  app role cannot TRUNCATE postings';
+    END;
+    UPDATE account_balances SET updated_at = updated_at WHERE false;
+    DELETE FROM idempotency_keys WHERE false;
+    RAISE NOTICE 'pass  app role can update balances and delete idempotency keys';
+END $$;
+
 \warn 'all guard tests passed'

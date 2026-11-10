@@ -9,7 +9,9 @@ x-app-env: &app-env
   OTEL_METRIC_EXPORT_INTERVAL: "5000"
   Logging__Console__FormatterName: json
   Logging__Console__FormatterOptions__IncludeScopes: "true"
-  ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=contrapost;Username=contrapost;Password=contrapost;Gss Encryption Mode=Disable
+  # The services log in as contrapost_api, a member of the least-privilege contrapost_app role (design doc §11);
+  # only migrate uses the owner. Local-only passwords; a real deployment supplies them as secrets.
+  ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=contrapost;Username=contrapost_api;Password=contrapost-api;Gss Encryption Mode=Disable
   ConnectionStrings__RabbitMq: amqp://contrapost:contrapost@rabbitmq:5672
 
 services:
@@ -59,6 +61,9 @@ services:
     command: ["migrate"]
     environment:
       <<: *app-env
+      ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=contrapost;Username=contrapost;Password=contrapost;Gss Encryption Mode=Disable
+      Bootstrap__AppUser: contrapost_api
+      Bootstrap__AppPassword: contrapost-api
       # Local only: the admin dashboard's key, created here if missing (refused for non-cp_dev_ keys).
       Bootstrap__AdminApiKey: &dashboard-key cp_dev_dashboard.local-only-not-a-secret
     depends_on:

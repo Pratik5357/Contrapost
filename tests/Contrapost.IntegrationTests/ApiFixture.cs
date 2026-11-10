@@ -30,7 +30,15 @@ public sealed class ApiFixture : IAsyncLifetime
     private readonly RedisContainer _redis = new RedisBuilder("redis:7.4").Build();
     private WebApplicationFactory<Program>? _factory;
 
+    private const string AppUser = "contrapost_test_app";
+    private const string AppPassword = "test-app-password";
+
+    /// <summary>The owner's connection: migrations, and tests that corrupt or inspect state directly.</summary>
     public string ConnectionString => _postgres.GetConnectionString();
+
+    /// <summary>The least-privilege login every host runs as, the way the deployed services do (design doc §11).</summary>
+    public string AppConnectionString =>
+        new NpgsqlConnectionStringBuilder(ConnectionString) { Username = AppUser, Password = AppPassword }.ToString();
 
     public string RabbitUri => _rabbit.GetConnectionString();
 
@@ -39,14 +47,23 @@ public sealed class ApiFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await Task.WhenAll(_postgres.StartAsync(), _rabbit.StartAsync(), _redis.StartAsync());
+
+        // Migrate as the owner and create the app login, as the migrate command does; then every host runs
+        // as that login, so the whole suite also proves the role has every privilege the services need.
+        await using (var owner = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.UseSetting("ConnectionStrings:Postgres", ConnectionString)))
+        {
+            await owner.Services.MigrateDatabaseAsync();
+            await owner.Services.EnsureAppLoginAsync(AppUser, AppPassword);
+        }
+
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
+            builder.UseSetting("ConnectionStrings:Postgres", AppConnectionString);
             builder.UseSetting("ApiKeys:Environment", "test");
             // Short, so the in-progress test doesn't wait the production 5 s.
             builder.UseSetting("Idempotency:LockTimeoutMs", "1000");
         });
-        await _factory.Services.MigrateDatabaseAsync();
     }
 
     public async Task DisposeAsync()
@@ -68,7 +85,7 @@ public sealed class ApiFixture : IAsyncLifetime
     public WebApplicationFactory<Program> CreateApi(IReadOnlyDictionary<string, string?> settings) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseSetting("ConnectionStrings:Postgres", ConnectionString);
+            builder.UseSetting("ConnectionStrings:Postgres", AppConnectionString);
             builder.UseSetting("ApiKeys:Environment", "test");
             foreach (var (key, value) in settings)
             {
@@ -112,7 +129,7 @@ public sealed class ApiFixture : IAsyncLifetime
     private IConfiguration MessagingConfiguration(string? rabbitUri) => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ConnectionStrings:Postgres"] = ConnectionString,
+            ["ConnectionStrings:Postgres"] = AppConnectionString,
             ["ConnectionStrings:RabbitMq"] = rabbitUri ?? RabbitUri,
             ["Consumers:LowBalanceThreshold"] = "1000",
         })

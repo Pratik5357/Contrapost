@@ -12,6 +12,7 @@ builder.Services.AddHostedService<LedgerHealthMonitorJob>();
 builder.Services.AddHostedService<HoldExpiryJob>();
 builder.Services.AddHostedService<OutboxRelayJob>();
 builder.Services.AddHostedService<ReconciliationJob>();
+builder.Services.AddHostedService<RetentionJob>();
 builder.Services.AddSingleton(TimeProvider.System);
 
 await builder.Build().RunAsync();

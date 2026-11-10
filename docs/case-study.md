@@ -118,9 +118,9 @@ Details: [C2 and C3](results/chaos-m4.md), [C1, C4 and C5](results/chaos-m6.md).
 - **A hot account is the real ceiling.** Even the best strategy serializes transfers on one balance row. The `hot_account` load test cuts throughput by a third at only 5 users. Sharding a hot account into sub-accounts is the next step.
 - **Round trips matter more than they look.** C4 showed a transfer makes about 11 sequential trips to Postgres. Invisible on localhost, it is 10–20 ms per transfer against a database in another zone, so the API and database belong in the same region, and batching statements would help.
 - **Test the observability too.** Taking the screenshots for this write-up showed the reconciliation-findings gauge stuck at -1: only the Worker's own nightly run set it, so an on-demand run that found drift wouldn't have fired the alert. The gauge now reads the latest run from the database.
-- **Writing the ADRs was an audit.** Checking each claim against the code found three designed features that were never built (two cleanup jobs and a least-privilege database role). They're now marked as such rather than claimed.
+- **Writing the ADRs was an audit.** Checking each claim against the code found three designed features that had never been built: two cleanup jobs and a least-privilege database role. I built them next. The services now log in as a role that can't update or delete history, and the whole integration suite runs as that role, which proves it has exactly the privileges they need.
 
-**What I'd do next:** hot-account sharding, the two cleanup jobs and separate database roles, write actions in the dashboard with an audit trail, and a cloud deployment with a public demo.
+**What I'd do next:** hot-account sharding, write actions in the dashboard with an audit trail, and a cloud deployment with a public demo.
 
 ---
 
