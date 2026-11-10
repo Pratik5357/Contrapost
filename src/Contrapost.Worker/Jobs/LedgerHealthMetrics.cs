@@ -8,7 +8,7 @@ namespace Contrapost.Worker.Jobs;
 /// <summary>
 /// Gauges for the state the Worker looks after (design doc §12): outbox backlog and lag, and the last
 /// reconciliation's findings. Observable gauges are read on every export, so the values are refreshed
-/// by <see cref="OutboxMonitorJob"/> rather than queried in the callback.
+/// by <see cref="LedgerHealthMonitorJob"/> rather than queried in the callback.
 /// </summary>
 internal sealed class LedgerHealthMetrics
 {
@@ -36,8 +36,12 @@ internal sealed class LedgerHealthMetrics
     public void SetReconciliationFindings(long findings) => Interlocked.Exchange(ref _reconciliationFindings, findings);
 }
 
-/// <summary>Samples the outbox backlog every few seconds for <see cref="LedgerHealthMetrics"/>.</summary>
-internal sealed partial class OutboxMonitorJob(NpgsqlDataSource dataSource, LedgerHealthMetrics metrics, ILogger<OutboxMonitorJob> logger)
+/// <summary>
+/// Samples the outbox backlog and the latest finished reconciliation run every few seconds for
+/// <see cref="LedgerHealthMetrics"/>. The run is read from the database, so the gauge (and the
+/// ReconciliationDrift alert) also covers on-demand runs and survives a Worker restart.
+/// </summary>
+internal sealed partial class LedgerHealthMonitorJob(NpgsqlDataSource dataSource, LedgerHealthMetrics metrics, ILogger<LedgerHealthMonitorJob> logger)
     : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -55,6 +59,17 @@ internal sealed partial class OutboxMonitorJob(NpgsqlDataSource dataSource, Ledg
                     """,
                     cancellationToken: stoppingToken));
                 metrics.SetOutbox(unpublished, lag);
+
+                var findings = await connection.QuerySingleOrDefaultAsync<int?>(new CommandDefinition(
+                    """
+                    SELECT findings_count FROM reconciliation_runs
+                    WHERE status IN ('clean', 'drift_found') ORDER BY started_at DESC LIMIT 1
+                    """,
+                    cancellationToken: stoppingToken));
+                if (findings is { } count)
+                {
+                    metrics.SetReconciliationFindings(count);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -64,6 +79,6 @@ internal sealed partial class OutboxMonitorJob(NpgsqlDataSource dataSource, Ledg
         while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not sample the outbox backlog")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not sample the outbox backlog or the latest reconciliation run")]
     private partial void LogFailed(Exception exception);
 }
