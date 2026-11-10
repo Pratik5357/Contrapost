@@ -12,6 +12,8 @@ internal sealed class AccountRow
         b.debits_posted, b.credits_posted, b.debits_pending, b.credits_pending, b.entry_seq, b.version
         """;
 
+    /// <summary>Only set by the admin reads, which select <c>client_id</c> as well.</summary>
+    public Guid ClientId { get; init; }
     public Guid Id { get; init; }
     public string Code { get; init; } = "";
     public string Currency { get; init; } = "";

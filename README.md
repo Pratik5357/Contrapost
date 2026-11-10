@@ -15,6 +15,7 @@ Milestone M6 (in progress):
 - Per-client rate limiting: a Redis sliding window returns `429` with `Retry-After`, and lets requests through if Redis is down ([ADR-006](docs/adr/ADR-006-rate-limiter-fails-open.md)).
 - Events: a transactional outbox, relayed to RabbitMQ with publisher confirms, consumed by a statement projector and a low-balance notifier that deduplicate through an inbox. Quorum queues with dead-letter queues hold poison messages.
 - Reconciliation of invariants I1–I8, nightly in the Worker or on demand, with the results readable at `/v1/admin/reconciliation/*`.
+- Admin API (M7): cross-tenant, read-only `/v1/admin/*` reads for the operator dashboard (overview, account search and detail, transactions, holds, outbox, reconciliation), each logged with the operator session ([ADR-010](docs/adr/ADR-010-read-only-admin-through-the-api.md)).
 - Verification: a headline concurrency test (random mixed operations, then a reconciliation that must be clean) and FsCheck property tests of the domain rules.
 
 - Observability: OpenTelemetry traces (one trace per transfer, from the API through the outbox relay to the consumers), the `ledger_*` metrics, and a Grafana dashboard with Prometheus alerts.

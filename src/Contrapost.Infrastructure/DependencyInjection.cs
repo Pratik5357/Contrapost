@@ -1,10 +1,12 @@
 using Contrapost.Application.Accounts;
+using Contrapost.Application.Admin;
 using Contrapost.Application.Clients;
 using Contrapost.Application.Holds;
 using Contrapost.Application.Idempotency;
 using Contrapost.Application.RateLimiting;
 using Contrapost.Application.Reconciliation;
 using Contrapost.Application.Transfers;
+using Contrapost.Infrastructure.Admin;
 using Contrapost.Infrastructure.Ledger;
 using Contrapost.Infrastructure.Messaging;
 using Contrapost.Infrastructure.Persistence;
@@ -47,6 +49,7 @@ public static class DependencyInjection
             // I7 only looks at events still inside the outbox retention window (7 days), with a day's margin.
             EventWindow: TimeSpan.FromDays(configuration.GetValue("Reconciliation:EventWindowDays", 6))));
         services.AddScoped<IReconciliationStore, ReconciliationStore>();
+        services.AddScoped<IAdminStore, AdminStore>();
 
         services.AddScoped<LedgerSession>();
         services.AddScoped<IIdempotencyScope>(provider => provider.GetRequiredService<LedgerSession>());

@@ -21,6 +21,24 @@ internal static class PgEnum
         _ => throw new ArgumentOutOfRangeException(nameof(value), value, null),
     };
 
+    public static string ToLabel(HoldStatus value) => value switch
+    {
+        HoldStatus.Pending => "pending",
+        HoldStatus.PartiallyCaptured => "partially_captured",
+        HoldStatus.Captured => "captured",
+        HoldStatus.Voided => "voided",
+        HoldStatus.Expired => "expired",
+        _ => throw new ArgumentOutOfRangeException(nameof(value), value, null),
+    };
+
+    public static string ToLabel(AccountStatus value) => value switch
+    {
+        AccountStatus.Active => "active",
+        AccountStatus.Frozen => "frozen",
+        AccountStatus.Closed => "closed",
+        _ => throw new ArgumentOutOfRangeException(nameof(value), value, null),
+    };
+
     public static TransactionKind ToTransactionKind(string label) => label switch
     {
         "transfer" => TransactionKind.Transfer,

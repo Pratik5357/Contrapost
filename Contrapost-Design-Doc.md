@@ -383,6 +383,7 @@ Base path `/v1`. JSON throughout. Errors use RFC 9457 Problem Details. Every `PO
 | `GET` | `/admin/overview` | Totals per currency, recent transfer counts, outbox lag, latest reconciliation run |
 | `GET` | `/admin/accounts?q=&client_id=&currency=&status=&after=` | Search accounts across clients (keyset paging) |
 | `GET` | `/admin/accounts/{id}` | Account with balances, open holds and recent entries |
+| `GET` | `/admin/accounts/{id}/entries?after={cursor}&limit=50` | Entry history of any client's account (same paging as `/accounts/{id}/entries`) |
 | `GET` | `/admin/transactions/{id}` | Transaction with legs, linked hold or reversal, and its outbox message |
 | `GET` | `/admin/holds?status=&expiring_within=&after=` | Holds by status or upcoming expiry |
 | `GET` | `/admin/reconciliation/runs` | Latest reconciliation results |
@@ -390,7 +391,7 @@ Base path `/v1`. JSON throughout. Errors use RFC 9457 Problem Details. Every `PO
 | `GET` | `/admin/outbox?state=unpublished\|failing&after=` | Outbox messages waiting or failing |
 | `GET` | `/health/live`, `/health/ready` | Liveness and readiness probes |
 
-All `/admin/*` endpoints require the `admin:read` scope, are read-only, and are the only endpoints that read across clients. They are served by EF Core read queries with `AsNoTracking`, take no locks, and could later point at a read replica.
+All `/admin/*` endpoints require the `admin:read` scope, are read-only, and are the only endpoints that read across clients ([ADR-010](docs/adr/ADR-010-read-only-admin-through-the-api.md)). Detail endpoints find the owning client and then reuse the client-scoped reads, so an operator sees the same JSON the client would; search, overview and outbox are plain autocommit `SELECT`s (Dapper, like every other read). None takes locks, so they could later point at a read replica. Lists are keyset-paged in id order with an opaque `after` cursor (`next_cursor` in each page, default 50, maximum 200). The overview's request counts come from `idempotency_keys`, which records each money-moving request's final status except `400`s and `5xx`.
 
 ### 7.2 Examples
 
@@ -799,7 +800,7 @@ contrapost/
 7. ADR-007 Holds are the record of pending money; postings record only posted money
 8. ADR-008 Database guards as a second line of defence (composite FKs, overdraft `CHECK`s, deferred balance triggers)
 9. ADR-009 Minimal APIs instead of controllers *(written)*
-10. ADR-010 Admin dashboard is read-only and reads only through the API
+10. ADR-010 Admin dashboard is read-only and reads only through the API *(written)*
 
 ---
 
