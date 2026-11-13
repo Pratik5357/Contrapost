@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Badge, Empty } from "@/components/ui";
+import { Badge, Empty, Time } from "@/components/ui";
 import { adminGet } from "@/lib/api";
-import { dateTime, duration } from "@/lib/format";
+import { duration } from "@/lib/format";
 import type { ReconciliationRun } from "@/lib/types";
 
 export const metadata = { title: "Reconciliation" };
@@ -35,7 +35,7 @@ export default async function ReconciliationPage() {
               {runs.map((run) => (
                 <tr key={run.id}>
                   <td>
-                    <Link href={`/reconciliation/${run.id}`}>{dateTime(run.started_at)}</Link>
+                    <Link href={`/reconciliation/${run.id}`}><Time iso={run.started_at} /></Link>
                   </td>
                   <td>
                     <Badge value={run.status} />

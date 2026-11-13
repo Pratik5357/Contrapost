@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { AutoRefresh } from "@/components/AutoRefresh";
-import { Badge, Empty } from "@/components/ui";
+import { LiveStatus } from "@/components/LiveStatus";
+import { Badge, Empty, Time } from "@/components/ui";
 import { adminGet } from "@/lib/api";
-import { dateTime, duration, money } from "@/lib/format";
+import { duration, money } from "@/lib/format";
 import type { Overview } from "@/lib/types";
 
 export const metadata = { title: "Overview" };
@@ -17,23 +17,27 @@ export default async function OverviewPage() {
 
   return (
     <>
-      <AutoRefresh seconds={5} />
-      <h1>Overview</h1>
-      <p className="subtitle">Refreshes every 5 seconds.</p>
+      <header className="page-header">
+        <div>
+          <h1>Overview</h1>
+          <p className="subtitle">The ledger at a glance: money in balance, events flowing, the last self-check.</p>
+        </div>
+        <LiveStatus seconds={5} renderedAt={Date.now()} />
+      </header>
 
       <section className="cards">
         <div className="card">
           <div className="caption">Unpublished events</div>
           <div className="value">{outbox.unpublished.toLocaleString("en-IN")}</div>
           <div className="caption">
-            {outbox.unpublished > 0 ? `oldest ${duration(outbox.oldest_unpublished_seconds)}` : "outbox is drained"}
+            {outbox.unpublished > 0 ? `oldest is ${duration(outbox.oldest_unpublished_seconds)} old` : "all events published"}
           </div>
         </div>
         <div className="card">
           <div className="caption">Failing events</div>
           <div className="value">{outbox.failing.toLocaleString("en-IN")}</div>
           <div className="caption">
-            <Link href="/outbox?state=failing">see the outbox</Link>
+            {outbox.failing > 0 ? <Link href="/outbox?state=failing">see what&apos;s failing →</Link> : "nothing is retrying"}
           </div>
         </div>
         <div className="card">
@@ -42,7 +46,7 @@ export default async function OverviewPage() {
           <div className="caption">
             {run ? (
               <Link href={`/reconciliation/${run.id}`}>
-                {dateTime(run.started_at)} · {run.findings_count ?? 0} findings
+                <Time iso={run.started_at} /> · {run.findings_count ?? 0} findings →
               </Link>
             ) : (
               "no runs yet"

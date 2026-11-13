@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { label, short } from "@/lib/format";
+import { dateTime, label, relative, short } from "@/lib/format";
 
 const tones: Record<string, string> = {
   active: "good",
@@ -45,4 +45,29 @@ export function Pager({ basePath, params, next }: { basePath: string; params: Re
 
 export function Empty({ children }: { children: React.ReactNode }) {
   return <p className="muted empty">{children}</p>;
+}
+
+/** A relative time ("5 min ago"), with the exact time on hover and for screen readers' context. */
+export function Time({ iso, fallback = "—" }: { iso: string | null; fallback?: string }) {
+  if (!iso) return <span className="muted">{fallback}</span>;
+  return (
+    <time dateTime={iso} title={dateTime(iso)}>
+      {relative(iso)}
+    </time>
+  );
+}
+
+/** "12 shown" plus a way back to the unfiltered list, next to a page's filters. */
+export function ResultSummary({ count, more, filtered, clearHref }: { count: number; more: boolean; filtered: boolean; clearHref: string }) {
+  return (
+    <p className="result-summary muted">
+      {count.toLocaleString("en-IN")} shown{more ? ", more on the next page" : ""}
+      {filtered && (
+        <>
+          {" · "}
+          <Link href={clearHref}>Clear filters</Link>
+        </>
+      )}
+    </p>
+  );
 }

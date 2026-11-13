@@ -10,31 +10,37 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
 
   return (
     <main className="login">
-      <h1>Contrapost admin</h1>
-      <p className="muted">Read-only operator console for the ledger.</p>
-      <form action={logIn} className="stack">
-        <label>
-          Username
-          <input name="username" autoComplete="username" required />
-        </label>
-        <label>
-          Password
-          <input name="password" type="password" autoComplete="current-password" required />
-        </label>
-        {error && (
-          <p className="error" role="alert">
-            Wrong username or password.
-          </p>
-        )}
-        <button type="submit">Log in</button>
-      </form>
-      {guestModeEnabled() && (
-        <form action={continueAsGuest}>
-          <button type="submit" className="secondary">
-            Continue as guest
-          </button>
+      <div className="login-card">
+        <p className="brand">
+          <span className="brand-mark" aria-hidden="true" />
+          Contrapost
+        </p>
+        <h1>Operator sign in</h1>
+        <p className="muted">A read-only view of the ledger: balances, transactions, holds and the system&apos;s health.</p>
+        <form action={logIn} className="stack">
+          <label>
+            Username
+            <input name="username" autoComplete="username" autoFocus required />
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autoComplete="current-password" required />
+          </label>
+          {error && (
+            <p className="error" role="alert">
+              Wrong username or password.
+            </p>
+          )}
+          <button type="submit">Log in</button>
         </form>
-      )}
+        {guestModeEnabled() && (
+          <form action={continueAsGuest}>
+            <button type="submit" className="secondary wide">
+              Continue as guest
+            </button>
+          </form>
+        )}
+      </div>
     </main>
   );
 }

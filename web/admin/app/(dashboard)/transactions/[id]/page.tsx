@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Badge, Empty, Id } from "@/components/ui";
+import { CopyId } from "@/components/CopyId";
+import { Badge, Empty, Id, Time } from "@/components/ui";
 import { adminGet } from "@/lib/api";
-import { dateTime, money } from "@/lib/format";
+import { money } from "@/lib/format";
 import type { TransactionDetail } from "@/lib/types";
 
 export const metadata = { title: "Transaction" };
@@ -14,11 +16,13 @@ export default async function TransactionPage({ params }: { params: Promise<{ id
 
   return (
     <>
-      <h1>
-        {tx.kind} <code>{tx.id}</code>
-      </h1>
+      <h1 className="capitalize">{tx.kind}</h1>
+      <CopyId id={tx.id} />
       <p className="subtitle">
-        <Badge value={tx.status} /> · {dateTime(tx.created_at)} · client <code>{detail.client_id}</code>
+        <Badge value={tx.status} /> · <Time iso={tx.created_at} /> · client{" "}
+        <Link href={`/accounts?client_id=${detail.client_id}`}>
+          <code title={detail.client_id}>…{detail.client_id.slice(-8)}</code>
+        </Link>
       </p>
 
       <dl className="facts">
@@ -98,8 +102,8 @@ export default async function TransactionPage({ params }: { params: Promise<{ id
               {detail.events.map((event) => (
                 <tr key={event.id}>
                   <td>{event.type}</td>
-                  <td>{dateTime(event.created_at)}</td>
-                  <td>{event.published_at ? dateTime(event.published_at) : <Badge value="pending" />}</td>
+                  <td><Time iso={event.created_at} /></td>
+                  <td>{event.published_at ? <Time iso={event.published_at} /> : <Badge value="pending" />}</td>
                   <td className="num">{event.attempts}</td>
                   <td className="wrap">{event.last_error ?? "—"}</td>
                 </tr>

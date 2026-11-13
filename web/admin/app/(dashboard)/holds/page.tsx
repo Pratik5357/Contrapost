@@ -1,6 +1,6 @@
-import { Badge, Empty, Id, Pager } from "@/components/ui";
+import { Badge, Empty, Id, Pager, ResultSummary, Time } from "@/components/ui";
 import { adminList } from "@/lib/api";
-import { dateTime, money } from "@/lib/format";
+import { money } from "@/lib/format";
 import type { AdminHold, Page } from "@/lib/types";
 
 export const metadata = { title: "Holds" };
@@ -41,6 +41,14 @@ export default async function HoldsPage({ searchParams }: { searchParams: Promis
         <button type="submit">Filter</button>
       </form>
 
+      {page && (
+        <ResultSummary
+          count={page.items.length}
+          more={page.next_cursor !== null}
+          filtered={Boolean(params.status || params.expiring)}
+          clearHref="/holds"
+        />
+      )}
       {invalid !== null ? (
         <p className="error" role="alert">
           {invalid}
@@ -84,7 +92,7 @@ export default async function HoldsPage({ searchParams }: { searchParams: Promis
                   <td className="num">{money(hold.amount, hold.currency)}</td>
                   <td className="num">{money(hold.captured_amount, hold.currency)}</td>
                   <td className="num">{money(hold.remaining, hold.currency)}</td>
-                  <td>{dateTime(hold.expires_at)}</td>
+                  <td><Time iso={hold.expires_at} /></td>
                 </tr>
               ))}
             </tbody>
