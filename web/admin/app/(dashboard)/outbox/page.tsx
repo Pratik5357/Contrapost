@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Empty, Id, Pager } from "@/components/ui";
+import { Empty, Id, Pager, Time } from "@/components/ui";
 import { adminGet } from "@/lib/api";
-import { dateTime } from "@/lib/format";
+
 import type { OutboxMessage, Page } from "@/lib/types";
 
 export const metadata = { title: "Outbox" };
@@ -53,8 +53,8 @@ export default async function OutboxPage({ searchParams }: { searchParams: Promi
                       id={message.aggregate_id}
                     />
                   </td>
-                  <td>{dateTime(message.created_at)}</td>
-                  <td>{dateTime(message.next_attempt_at)}</td>
+                  <td><Time iso={message.created_at} /></td>
+                  <td><Time iso={message.next_attempt_at} /></td>
                   <td className="num">{message.attempts}</td>
                   <td className="wrap">{message.last_error ?? "—"}</td>
                 </tr>

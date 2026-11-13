@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Badge, Empty, Pager } from "@/components/ui";
+import { Badge, Empty, Pager, ResultSummary } from "@/components/ui";
 import { adminList } from "@/lib/api";
 import { money, short } from "@/lib/format";
 import type { AdminAccount, Page } from "@/lib/types";
@@ -42,12 +42,20 @@ export default async function AccountsPage({ searchParams }: { searchParams: Pro
         <button type="submit">Search</button>
       </form>
 
+      {page && (
+        <ResultSummary
+          count={page.items.length}
+          more={page.next_cursor !== null}
+          filtered={Boolean(params.q || params.client_id || params.currency || params.status)}
+          clearHref="/accounts"
+        />
+      )}
       {invalid !== null ? (
         <p className="error" role="alert">
           {invalid}
         </p>
       ) : page.items.length === 0 ? (
-        <Empty>No accounts match.</Empty>
+        <Empty>No accounts match these filters. Try a shorter code, or clear the filters.</Empty>
       ) : (
         <div className="table-wrap">
           <table>

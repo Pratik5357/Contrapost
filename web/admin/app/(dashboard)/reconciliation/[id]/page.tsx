@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Badge, Empty } from "@/components/ui";
+import { Badge, Empty, Time } from "@/components/ui";
 import { adminGet } from "@/lib/api";
-import { dateTime } from "@/lib/format";
+
 import type { Finding, ReconciliationRun } from "@/lib/types";
 
 export const metadata = { title: "Reconciliation run" };
@@ -23,7 +23,7 @@ export default async function RunPage({ params }: { params: Promise<{ id: string
       <p className="subtitle">
         {run ? (
           <>
-            <Badge value={run.status} /> · started {dateTime(run.started_at)} · {run.accounts_checked ?? 0} accounts checked
+            <Badge value={run.status} /> · started <Time iso={run.started_at} /> · {run.accounts_checked ?? 0} accounts checked
           </>
         ) : (
           <code>{id}</code>

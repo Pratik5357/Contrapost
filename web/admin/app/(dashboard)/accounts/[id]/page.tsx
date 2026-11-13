@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Badge, Empty, Id, Pager } from "@/components/ui";
+import { CopyId } from "@/components/CopyId";
+import { Badge, Empty, Id, Pager, Time } from "@/components/ui";
 import { adminGet } from "@/lib/api";
-import { dateTime, money } from "@/lib/format";
+import { money } from "@/lib/format";
 import type { AccountDetail, EntryPage } from "@/lib/types";
 
 export const metadata = { title: "Account" };
@@ -25,7 +26,11 @@ export default async function AccountPage({
 
   return (
     <>
+      <p className="crumbs">
+        <Link href="/accounts">Accounts</Link> / {account.currency}
+      </p>
       <h1>{account.code}</h1>
+      <CopyId id={account.id} />
       <p className="subtitle">
         <Badge value={account.status} /> · {account.normal_side}-normal · {account.prevent_overdraft ? "no overdraft" : "may go negative"} ·
         client <Link href={`/accounts?client_id=${detail.client_id}`}>{detail.client_id}</Link>
@@ -82,7 +87,7 @@ export default async function AccountPage({
                     <Id href={`/accounts/${hold.credit_account_id}`} id={hold.credit_account_id} />
                   </td>
                   <td className="num">{money(hold.remaining, hold.currency)}</td>
-                  <td>{dateTime(hold.expires_at)}</td>
+                  <td><Time iso={hold.expires_at} /></td>
                 </tr>
               ))}
             </tbody>
@@ -114,7 +119,7 @@ export default async function AccountPage({
                   </td>
                   <td>{entry.direction}</td>
                   <td className="num">{money(entry.amount, currency)}</td>
-                  <td>{dateTime(entry.created_at)}</td>
+                  <td><Time iso={entry.created_at} /></td>
                 </tr>
               ))}
             </tbody>
